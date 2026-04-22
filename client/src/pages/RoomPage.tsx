@@ -1,0 +1,199 @@
+import { useEffect, useState } from "react";
+import { useParams, useLocation } from "wouter";
+import { Button } from "@/components/ui/button";
+import { PlayerAvatar } from "@/components/PlayerAvatar";
+import { trpc } from "@/lib/trpc";
+import { Copy, Check, Play } from "lucide-react";
+
+const GAME_MODE_LABELS: Record<string, string> = {
+  classic: "Classic",
+  spicy: "Spicy",
+  party: "Party",
+};
+
+export default function RoomPage() {
+  const { roomCode } = useParams<{ roomCode: string }>();
+  const [, navigate] = useLocation();
+  const [copied, setCopied] = useState(false);
+  const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
+
+  // Fetch room data
+  const { data: room, isLoading, error } = trpc.game.joinRoom.useQuery(
+    { roomCode: roomCode?.toUpperCase() || "" },
+    { enabled: !!roomCode }
+  );
+
+  const setReadyMutation = trpc.game.setPlayerReady.useMutation();
+  const startGameMutation = trpc.game.startGame.useMutation();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-xl text-foreground">Loading room...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !room) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-2xl text-destructive font-bold mb-4">Room Not Found</p>
+          <Button onClick={() => navigate("/")} className="bg-accent hover:bg-accent/90">
+            Back to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(roomCode || "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleToggleReady = async (playerId: number) => {
+    const player = room.players.find((p) => p.id === playerId);
+    if (player) {
+      await setReadyMutation.mutateAsync({
+        playerId,
+        isReady: !player.isReady,
+      });
+    }
+  };
+
+  const handleStartGame = async () => {
+    if (!room.roomId) return;
+
+    try {
+      await startGameMutation.mutateAsync({ roomId: room.roomId });
+      navigate(`/game/${room.roomId}`);
+    } catch (error) {
+      console.error("Failed to start game:", error);
+      alert("Failed to start game. Please try again.");
+    }
+  };
+
+  const allPlayersReady = room.players.every((p) => p.isReady);
+  const gameModeLabel = GAME_MODE_LABELS[room.gameMode] || room.gameMode;
+
+  return (
+    <div className="min-h-screen bg-background text-foreground overflow-hidden">
+      {/* Animated background */}
+      <div className="fixed inset-0 z-0">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-secondary/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: "1s" }} />
+      </div>
+
+      {/* Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        {/* Header */}
+        <div className="border-b border-accent/30 bg-card/50 backdrop-blur-sm p-6">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold neon-text mb-2">Room: {roomCode}</h1>
+              <p className="text-foreground/70">
+                Mode: <span className="font-bold text-accent uppercase">{gameModeLabel}</span> • Rounds: {room.roundCount}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              className="border-accent text-accent hover:bg-accent/10"
+              onClick={handleCopyCode}
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 mr-2" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy Code
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* Players Grid */}
+        <div className="flex-1 p-6 md:p-12">
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-2xl font-bold mb-8">Players ({room.players.length})</h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+              {room.players.map((player) => (
+                <div
+                  key={player.id}
+                  className={`p-6 rounded-lg border-2 transition-all transform hover:scale-105 cursor-pointer flex flex-col items-center text-center ${
+                    player.isReady
+                      ? "border-accent bg-accent/10 neon-glow-primary"
+                      : "border-muted bg-card/50 hover:border-accent/50"
+                  }`}
+                  onClick={() => setSelectedPlayerId(selectedPlayerId === player.id ? null : player.id)}
+                >
+                  <PlayerAvatar
+                    name={player.name}
+                    score={player.score}
+                    isActive={player.isReady}
+                    size="md"
+                    className="mb-4"
+                  />
+
+                  <h3 className="text-lg font-bold text-foreground mb-4">{player.name}</h3>
+
+                  <Button
+                    size="sm"
+                    className={`w-full ${
+                      player.isReady
+                        ? "bg-accent/20 text-accent hover:bg-accent/30"
+                        : "bg-muted text-foreground hover:bg-muted/80"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleReady(player.id);
+                    }}
+                    disabled={setReadyMutation.isPending}
+                  >
+                    {player.isReady ? "✓ Ready" : "Not Ready"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Start Game Button */}
+            <div className="flex gap-4 justify-center">
+              <Button
+                size="lg"
+                className="bg-accent hover:bg-accent/90 text-background font-bold px-8 py-6 neon-glow-primary disabled:opacity-50"
+                onClick={handleStartGame}
+                disabled={!allPlayersReady || startGameMutation.isPending}
+              >
+                <Play className="mr-2 w-6 h-6" />
+                {startGameMutation.isPending ? "Starting..." : "Start Game"}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="border-2 border-secondary text-secondary hover:bg-secondary/10"
+                onClick={() => navigate("/")}
+              >
+                Back to Home
+              </Button>
+            </div>
+
+            {!allPlayersReady && (
+              <p className="text-center text-foreground/60 mt-6">
+                Waiting for all players to be ready...
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

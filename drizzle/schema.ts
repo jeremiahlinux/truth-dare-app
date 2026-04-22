@@ -25,4 +25,80 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+/**
+ * Game Rooms - Stores room metadata and game configuration
+ */
+export const rooms = mysqlTable("rooms", {
+  id: int("id").autoincrement().primaryKey(),
+  roomCode: varchar("roomCode", { length: 8 }).notNull().unique(), // e.g., "ABC123XY"
+  hostId: int("hostId").notNull().references(() => users.id),
+  gameMode: mysqlEnum("gameMode", ["classic", "spicy", "party"]).notNull(),
+  roundCount: int("roundCount").notNull().default(5),
+  status: mysqlEnum("status", ["waiting", "in_progress", "completed"]).notNull().default("waiting"),
+  currentRound: int("currentRound").notNull().default(0),
+  currentPlayerIndex: int("currentPlayerIndex").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Room = typeof rooms.$inferSelect;
+export type InsertRoom = typeof rooms.$inferInsert;
+
+/**
+ * Game Players - Stores player data within a room
+ */
+export const gamePlayers = mysqlTable("gamePlayers", {
+  id: int("id").autoincrement().primaryKey(),
+  roomId: int("roomId").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: int("userId").references(() => users.id),
+  playerName: varchar("playerName", { length: 64 }).notNull(),
+  playerIndex: int("playerIndex").notNull(), // Order in the game
+  score: int("score").notNull().default(0),
+  streak: int("streak").notNull().default(0),
+  completedCount: int("completedCount").notNull().default(0),
+  passedCount: int("passedCount").notNull().default(0),
+  skippedCount: int("skippedCount").notNull().default(0),
+  isReady: int("isReady").notNull().default(0), // 0 = false, 1 = true
+  isConnected: int("isConnected").notNull().default(1), // 0 = false, 1 = true
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type GamePlayer = typeof gamePlayers.$inferSelect;
+export type InsertGamePlayer = typeof gamePlayers.$inferInsert;
+
+/**
+ * Game Sessions - Stores individual game turn data
+ */
+export const gameSessions = mysqlTable("gameSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  roomId: int("roomId").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  round: int("round").notNull(),
+  playerTurnId: int("playerTurnId").notNull().references(() => gamePlayers.id),
+  questionType: mysqlEnum("questionType", ["truth", "dare"]).notNull(),
+  promptId: int("promptId").references(() => prompts.id),
+  action: mysqlEnum("action", ["completed", "passed", "skipped"]),
+  responseText: text("responseText"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type GameSession = typeof gameSessions.$inferSelect;
+export type InsertGameSession = typeof gameSessions.$inferInsert;
+
+/**
+ * Prompts - Stores generated Truth/Dare prompts
+ */
+export const prompts = mysqlTable("prompts", {
+  id: int("id").autoincrement().primaryKey(),
+  gameMode: mysqlEnum("gameMode", ["classic", "spicy", "party"]).notNull(),
+  playerCount: int("playerCount").notNull(), // Context: number of players
+  type: mysqlEnum("type", ["truth", "dare"]).notNull(),
+  text: text("text").notNull(),
+  difficulty: mysqlEnum("difficulty", ["easy", "medium", "hard"]).notNull().default("medium"),
+  usageCount: int("usageCount").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Prompt = typeof prompts.$inferSelect;
+export type InsertPrompt = typeof prompts.$inferInsert;
