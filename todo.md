@@ -71,7 +71,7 @@
 - [ ] Handle player disconnection and reconnection
 - [x] Broadcast turn changes and action results (via game state mutations)
 - [ ] Implement player join/leave notifications
-- [ ] Add connection status indicator
+- [x] Add connection status indicator
 - [ ] Test concurrent player actions
 
 ## Phase 8: Responsive Design & Mobile Optimization
@@ -85,8 +85,8 @@
 
 ## Phase 9: Testing & Quality Assurance
 - [x] Write unit tests for game logic
-- [ ] Write integration tests for multiplayer flows
-- [ ] Test edge cases (disconnections, timeouts, invalid inputs)
+- [x] Write integration tests for multiplayer flows
+- [x] Test edge cases (disconnections, timeouts, invalid inputs)
 - [ ] Performance testing and optimization
 - [ ] Cross-browser compatibility testing
 - [ ] Mobile device testing (iOS, Android)
@@ -96,7 +96,7 @@
 - [x] Code cleanup and refactoring
 - [x] Add loading states and error handling
 - [x] Implement analytics tracking (via Manus)
-- [ ] Create user documentation
+- [x] Create user documentation
 - [ ] Set up error logging and monitoring
 - [x] Final visual polish and consistency check
 - [ ] Performance optimization

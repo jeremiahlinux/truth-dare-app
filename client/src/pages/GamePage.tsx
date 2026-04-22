@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { PlayerAvatar } from "@/components/PlayerAvatar";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { trpc } from "@/lib/trpc";
 import { playSound, resumeAudioContext } from "@/utils/soundEffects";
 import { SkipForward, Volume2, VolumeX } from "lucide-react";
@@ -135,14 +136,17 @@ export default function GamePage() {
                 {currentPlayer.name}'s Turn
               </h2>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="border-accent text-accent"
-            >
-              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            </Button>
+            <div className="flex items-center gap-4">
+              <ConnectionStatus />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="border-accent text-accent"
+              >
+                {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </Button>
+            </div>
           </div>
         </div>
 
