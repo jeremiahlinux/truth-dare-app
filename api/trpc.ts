@@ -15,3 +15,9 @@ const handler = createHTTPHandler({
 export default function trpcHandler(req: IncomingMessage, res: ServerResponse) {
   return handler(req, res);
 }
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
