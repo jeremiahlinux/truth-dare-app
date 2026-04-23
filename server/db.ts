@@ -40,6 +40,105 @@ function describeDatabaseError(error: unknown) {
   return Array.from(details).join(" | ");
 }
 
+async function bootstrapGameSchema(db: ReturnType<typeof drizzle>) {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS \`users\` (
+      \`id\` int AUTO_INCREMENT NOT NULL,
+      \`openId\` varchar(64) NOT NULL,
+      \`name\` text,
+      \`email\` varchar(320),
+      \`loginMethod\` varchar(64),
+      \`role\` enum('user','admin') NOT NULL DEFAULT 'user',
+      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+      \`lastSignedIn\` timestamp NOT NULL DEFAULT (now()),
+      CONSTRAINT \`users_id\` PRIMARY KEY(\`id\`),
+      CONSTRAINT \`users_openId_unique\` UNIQUE(\`openId\`)
+    )`,
+    `CREATE TABLE IF NOT EXISTS \`rooms\` (
+      \`id\` int AUTO_INCREMENT NOT NULL,
+      \`roomCode\` varchar(8) NOT NULL,
+      \`gameMode\` enum('classic','spicy','party') NOT NULL,
+      \`roundCount\` int NOT NULL DEFAULT 5,
+      \`status\` enum('waiting','in_progress','completed') NOT NULL DEFAULT 'waiting',
+      \`currentRound\` int NOT NULL DEFAULT 0,
+      \`currentPlayerIndex\` int NOT NULL DEFAULT 0,
+      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT \`rooms_id\` PRIMARY KEY(\`id\`),
+      CONSTRAINT \`rooms_roomCode_unique\` UNIQUE(\`roomCode\`)
+    )`,
+    `CREATE TABLE IF NOT EXISTS \`gamePlayers\` (
+      \`id\` int AUTO_INCREMENT NOT NULL,
+      \`roomId\` int NOT NULL,
+      \`userId\` int,
+      \`playerName\` varchar(64) NOT NULL,
+      \`playerIndex\` int NOT NULL,
+      \`score\` int NOT NULL DEFAULT 0,
+      \`streak\` int NOT NULL DEFAULT 0,
+      \`completedCount\` int NOT NULL DEFAULT 0,
+      \`passedCount\` int NOT NULL DEFAULT 0,
+      \`skippedCount\` int NOT NULL DEFAULT 0,
+      \`isReady\` int NOT NULL DEFAULT 0,
+      \`isConnected\` int NOT NULL DEFAULT 1,
+      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT \`gamePlayers_id\` PRIMARY KEY(\`id\`)
+    )`,
+    `CREATE TABLE IF NOT EXISTS \`prompts\` (
+      \`id\` int AUTO_INCREMENT NOT NULL,
+      \`gameMode\` enum('classic','spicy','party') NOT NULL,
+      \`playerCount\` int NOT NULL,
+      \`type\` enum('truth','dare') NOT NULL,
+      \`text\` text NOT NULL,
+      \`difficulty\` enum('easy','medium','hard') NOT NULL DEFAULT 'medium',
+      \`usageCount\` int NOT NULL DEFAULT 0,
+      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+      CONSTRAINT \`prompts_id\` PRIMARY KEY(\`id\`)
+    )`,
+    `CREATE TABLE IF NOT EXISTS \`gameSessions\` (
+      \`id\` int AUTO_INCREMENT NOT NULL,
+      \`roomId\` int NOT NULL,
+      \`round\` int NOT NULL,
+      \`playerTurnId\` int NOT NULL,
+      \`questionType\` enum('truth','dare') NOT NULL,
+      \`status\` enum('pending','awaiting_confirmation','completed','skipped') NOT NULL DEFAULT 'pending',
+      \`promptText\` text NOT NULL,
+      \`promptId\` int,
+      \`action\` enum('completed','passed','skipped'),
+      \`performedByPlayerId\` int,
+      \`confirmedByPlayerId\` int,
+      \`confirmedAt\` timestamp NULL,
+      \`responseText\` text,
+      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT \`gameSessions_id\` PRIMARY KEY(\`id\`)
+    )`,
+  ];
+
+  for (const statement of statements) {
+    await db.execute(sql.raw(statement));
+  }
+
+  const reconciliationStatements = [
+    "ALTER TABLE `rooms` DROP FOREIGN KEY `rooms_hostId_users_id_fk`",
+    "ALTER TABLE `rooms` DROP COLUMN `hostId`",
+    "ALTER TABLE `gameSessions` ADD COLUMN `status` enum('pending','awaiting_confirmation','completed','skipped') NOT NULL DEFAULT 'pending'",
+    "ALTER TABLE `gameSessions` ADD COLUMN `promptText` text NOT NULL",
+    "ALTER TABLE `gameSessions` ADD COLUMN `performedByPlayerId` int",
+    "ALTER TABLE `gameSessions` ADD COLUMN `confirmedByPlayerId` int",
+    "ALTER TABLE `gameSessions` ADD COLUMN `confirmedAt` timestamp NULL",
+  ];
+
+  for (const statement of reconciliationStatements) {
+    try {
+      await db.execute(sql.raw(statement));
+    } catch {
+      // Ignore legacy-schema reconciliation failures when the DB is already aligned.
+    }
+  }
+}
+
 async function ensureDbReady(db: ReturnType<typeof drizzle>) {
   if (_dbReady) {
     return _dbReady;
@@ -50,6 +149,12 @@ async function ensureDbReady(db: ReturnType<typeof drizzle>) {
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
     } catch (error) {
       console.warn("[Database] Migration bootstrap failed:", error);
+    }
+
+    try {
+      await bootstrapGameSchema(db);
+    } catch (error) {
+      console.warn("[Database] Schema bootstrap failed:", error);
     }
   })();
 
