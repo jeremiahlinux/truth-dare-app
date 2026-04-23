@@ -10,6 +10,36 @@ let _db: ReturnType<typeof drizzle> | null = null;
 let _dbReady: Promise<void> | null = null;
 const MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
 
+function describeDatabaseError(error: unknown) {
+  const details = new Set<string>();
+
+  const collect = (value: unknown) => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const candidates = [
+      record.message,
+      record.sqlMessage,
+      record.code,
+      record.errno,
+      record.sqlState,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && String(candidate).trim().length > 0) {
+        details.add(String(candidate));
+      }
+    }
+  };
+
+  collect(error);
+  collect((error as { cause?: unknown } | null | undefined)?.cause);
+
+  return Array.from(details).join(" | ");
+}
+
 async function ensureDbReady(db: ReturnType<typeof drizzle>) {
   if (_dbReady) {
     return _dbReady;
@@ -118,12 +148,18 @@ export async function createRoom(gameMode: string, roundCount: number, roomCode:
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.insert(rooms).values({
-    roomCode,
-    gameMode: gameMode as any,
-    roundCount,
-    status: "waiting",
-  });
+  try {
+    await db.insert(rooms).values({
+      roomCode,
+      gameMode: gameMode as any,
+      roundCount,
+      status: "waiting",
+    });
+  } catch (error) {
+    const description = describeDatabaseError(error);
+    console.error("[Database] Failed to insert room:", error);
+    throw new Error(description || "Room insert failed");
+  }
 
   const createdRoom = await getRoomByCode(roomCode);
   if (!createdRoom) {
