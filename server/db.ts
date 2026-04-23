@@ -8,7 +8,28 @@ import { ENV } from "./_core/env.js";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _dbReady: Promise<void> | null = null;
+let _dbUnavailableReason: string | null = null;
 const MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
+
+function getDatabaseUrlError(databaseUrl: string) {
+  try {
+    const parsed = new URL(databaseUrl);
+    const protocol = parsed.protocol.toLowerCase();
+    const host = parsed.hostname.toLowerCase();
+
+    if (protocol === "postgres:" || protocol === "postgresql:") {
+      return "Unsupported DATABASE_URL: this app currently requires a MySQL-compatible database. Neon/Postgres URLs are not supported.";
+    }
+
+    if (host.includes("neon.tech")) {
+      return "Unsupported DATABASE_URL host: this app currently requires a MySQL-compatible database. Neon/Postgres URLs are not supported.";
+    }
+  } catch {
+    // Let the driver surface malformed URL errors.
+  }
+
+  return null;
+}
 
 function describeDatabaseError(error: unknown) {
   const details = new Set<string>();
@@ -165,13 +186,23 @@ async function ensureDbReady(db: ReturnType<typeof drizzle>) {
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
+      const urlError = getDatabaseUrlError(process.env.DATABASE_URL);
+      if (urlError) {
+        _dbUnavailableReason = urlError;
+        throw new Error(urlError);
+      }
+
       _db = drizzle(process.env.DATABASE_URL);
       await ensureDbReady(_db);
+      _dbUnavailableReason = null;
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
+      _dbUnavailableReason = error instanceof Error ? error.message : "Database not available";
       _db = null;
       _dbReady = null;
     }
+  } else if (!_db && !process.env.DATABASE_URL) {
+    _dbUnavailableReason = "DATABASE_URL is not configured.";
   }
   return _db;
 }
@@ -251,7 +282,7 @@ export async function getUserByOpenId(openId: string) {
 
 export async function createRoom(gameMode: string, roundCount: number, roomCode: string) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) throw new Error(_dbUnavailableReason ?? "Database not available");
 
   try {
     await db.insert(rooms).values({

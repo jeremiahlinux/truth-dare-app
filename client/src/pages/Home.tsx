@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocation } from "wouter";
@@ -172,6 +172,9 @@ export default function Home() {
         <DialogContent className="bg-card border-2 border-accent/50 max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl neon-text">Create a New Room</DialogTitle>
+            <DialogDescription>
+              Choose a mode, set the number of rounds, and add at least two players to start a room.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 py-6">
@@ -261,6 +264,9 @@ export default function Home() {
         <DialogContent className="bg-card border-2 border-secondary/50">
           <DialogHeader>
             <DialogTitle className="text-2xl neon-text">Join a Room</DialogTitle>
+            <DialogDescription>
+              Enter an 8-character room code to join an existing game with your friends.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 py-6">
