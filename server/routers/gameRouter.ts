@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc.ts";
-import { createRoom, getRoomByCode, getGamePlayersByRoomId, addGamePlayer, updatePlayerReady, getRoomById } from "../db.ts";
-import { initializeGame, getGameState, generateNextQuestion, handlePlayerAction, getCurrentPlayer, getGameResults, cleanupGame, replayGame, confirmPlayerAction } from "../services/gameManager.ts";
+import { publicProcedure, router } from "../_core/trpc.js";
+import { createRoom, getRoomByCode, getGamePlayersByRoomId, addGamePlayer, updatePlayerReady, getRoomById } from "../db.js";
+import { initializeGame, getGameState, generateNextQuestion, handlePlayerAction, getCurrentPlayer, getGameResults, cleanupGame, replayGame, confirmPlayerAction } from "../services/gameManager.js";
 import { nanoid } from "nanoid";
 
 // Generate a unique room code (8 characters)

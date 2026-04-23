@@ -1,7 +1,7 @@
-import { COOKIE_NAME } from "../shared/const.ts";
-import { getSessionCookieOptions } from "./_core/cookies.ts";
-import { publicProcedure, router } from "./_core/trpc.ts";
-import { gameRouter } from "./routers/gameRouter.ts";
+import { COOKIE_NAME } from "../shared/const.js";
+import { getSessionCookieOptions } from "./_core/cookies.js";
+import { publicProcedure, router } from "./_core/trpc.js";
+import { gameRouter } from "./routers/gameRouter.js";
 
 export const appRouter = router({
   auth: router({

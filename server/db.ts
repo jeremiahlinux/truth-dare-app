@@ -1,8 +1,8 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import type { InsertUser } from "../drizzle/schema.ts";
-import { users, rooms, gamePlayers, gameSessions, prompts } from "../drizzle/schema.ts";
-import { ENV } from "./_core/env.ts";
+import type { InsertUser } from "../drizzle/schema.js";
+import { users, rooms, gamePlayers, gameSessions, prompts } from "../drizzle/schema.js";
+import { ENV } from "./_core/env.js";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 

@@ -11,8 +11,8 @@ async function getHandler(): Promise<RequestHandler> {
 
   const [{ createHTTPHandler }, { appRouter }, { createContext }] = await Promise.all([
     import("@trpc/server/adapters/standalone"),
-    import("../../server/routers.ts"),
-    import("../../server/_core/context.ts"),
+    import("../../server/routers.js"),
+    import("../../server/_core/context.js"),
   ]);
 
   cachedHandler = createHTTPHandler({
