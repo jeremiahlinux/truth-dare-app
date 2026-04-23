@@ -14,6 +14,14 @@ const GAME_MODES = [
   { value: "party", label: "Party" },
 ];
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 export default function Home() {
   const [, navigate] = useLocation();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -64,7 +72,7 @@ export default function Home() {
       navigate(`/room/${result.roomCode}`);
     } catch (error) {
       console.error("Failed to create room:", error);
-      toast.error("Failed to create room. Please try again.");
+      toast.error(getErrorMessage(error, "Failed to create room. Please try again."));
     }
   };
 
@@ -81,7 +89,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Failed to join room:", error);
-      toast.error("Room not found. Please check the code and try again.");
+      toast.error(getErrorMessage(error, "Room not found. Please check the code and try again."));
     }
   };
 

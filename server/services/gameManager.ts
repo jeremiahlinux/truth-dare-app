@@ -9,8 +9,8 @@ import {
   setSessionAwaitingConfirmation,
   updatePlayerStats,
   updateRoomStatus,
-} from "../db";
-import { generateTruthAndDare } from "./promptGenerator";
+} from "../db.ts";
+import { generateTruthAndDare } from "./promptGenerator.ts";
 
 type GameMode = "classic" | "spicy" | "party";
 type SessionStatus = "pending" | "awaiting_confirmation" | "completed" | "skipped";

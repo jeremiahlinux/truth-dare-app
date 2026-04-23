@@ -1,4 +1,4 @@
-import type { User } from "../../drizzle/schema";
+import type { User } from "../../drizzle/schema.ts";
 
 export type TrpcContext = {
   req: any;

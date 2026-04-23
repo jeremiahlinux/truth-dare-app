@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
-import { appRouter } from "../server/routers";
-import { createContext } from "../server/_core/context";
+import { appRouter } from "../server/routers.ts";
+import { createContext } from "../server/_core/context.ts";
 
 const handler = createHTTPHandler({
   router: appRouter,

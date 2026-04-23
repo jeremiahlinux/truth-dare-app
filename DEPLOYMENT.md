@@ -5,15 +5,15 @@ This app is now structured for Vercel static hosting + serverless tRPC API.
 ## 1) Prerequisites
 
 - A Vercel account (Hobby plan is enough)
-- A free managed SQL database (Postgres or MySQL)
-  - Recommended: Neon Postgres free tier
-  - Alternative: PlanetScale free tier
+- A MySQL-compatible managed SQL database
+  - Recommended: PlanetScale
+  - Alternative: any hosted MySQL-compatible provider
 
 ## 2) Environment Variables
 
 Set these in Vercel Project Settings -> Environment Variables:
 
-- `DATABASE_URL` (required): your managed SQL connection string
+- `DATABASE_URL` (required): your MySQL-compatible connection string
 - `NODE_ENV=production`
 - `ENABLE_PLATFORM_ROUTES=false`
 - `OPENAI_API_KEY` (optional, not needed for template mode)
@@ -27,6 +27,8 @@ The game works without any LLM key (template prompts are used automatically).
 - Vercel config: `vercel.json`
 
 ## 4) Database Notes
+
+This codebase currently uses Drizzle's MySQL driver and MySQL schema definitions, so a Postgres/Neon connection string will not work without a DB layer migration.
 
 Use Drizzle migrations before first production run.
 

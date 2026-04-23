@@ -1,5 +1,5 @@
-import { invokeLLM } from "../_core/llm";
-import { storePrompt, getPromptsByContext } from "../db";
+import { invokeLLM } from "../_core/llm.ts";
+import { storePrompt, getPromptsByContext } from "../db.ts";
 
 type GameMode = "classic" | "spicy" | "party";
 type QuestionType = "truth" | "dare";
