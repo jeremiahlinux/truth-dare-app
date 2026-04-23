@@ -1,19 +1,41 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { migrate } from "drizzle-orm/mysql2/migrator";
+import { fileURLToPath } from "node:url";
 import type { InsertUser } from "../drizzle/schema.js";
 import { users, rooms, gamePlayers, gameSessions, prompts } from "../drizzle/schema.js";
 import { ENV } from "./_core/env.js";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _dbReady: Promise<void> | null = null;
+const MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
+
+async function ensureDbReady(db: ReturnType<typeof drizzle>) {
+  if (_dbReady) {
+    return _dbReady;
+  }
+
+  _dbReady = (async () => {
+    try {
+      await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    } catch (error) {
+      console.warn("[Database] Migration bootstrap failed:", error);
+    }
+  })();
+
+  return _dbReady;
+}
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
       _db = drizzle(process.env.DATABASE_URL);
+      await ensureDbReady(_db);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
+      _dbReady = null;
     }
   }
   return _db;
