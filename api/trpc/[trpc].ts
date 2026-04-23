@@ -1,20 +1,47 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createHTTPHandler } from "@trpc/server/adapters/standalone";
-import { appRouter } from "../../server/routers.ts";
-import { createContext } from "../../server/_core/context.ts";
 
-const handler = createHTTPHandler({
-  router: appRouter,
-  basePath: "/api/trpc/",
-  createContext: async ({ req, res }) =>
-    createContext({
-      req: req as any,
-      res: res as any,
-    }),
-});
+type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 
-export default function trpcHandler(req: IncomingMessage, res: ServerResponse) {
-  return handler(req, res);
+let cachedHandler: RequestHandler | null = null;
+
+async function getHandler(): Promise<RequestHandler> {
+  if (cachedHandler) {
+    return cachedHandler;
+  }
+
+  const [{ createHTTPHandler }, { appRouter }, { createContext }] = await Promise.all([
+    import("@trpc/server/adapters/standalone"),
+    import("../../server/routers.ts"),
+    import("../../server/_core/context.ts"),
+  ]);
+
+  cachedHandler = createHTTPHandler({
+    router: appRouter,
+    basePath: "/api/trpc/",
+    createContext: async ({ req, res }) =>
+      createContext({
+        req: req as any,
+        res: res as any,
+      }),
+  });
+
+  return cachedHandler;
+}
+
+export default async function trpcHandler(req: IncomingMessage, res: ServerResponse) {
+  try {
+    const handler = await getHandler();
+    return handler(req, res);
+  } catch (error) {
+    console.error("[tRPC API bootstrap error]", error);
+    res.statusCode = 500;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
+  }
 }
 
 export const config = {
