@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Home } from "lucide-react";
 import { useLocation } from "wouter";
 
@@ -11,23 +10,22 @@ export default function NotFound() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-      <Card className="w-full max-w-lg mx-4 shadow-lg border-0 bg-white/80 backdrop-blur-sm">
-        <CardContent className="pt-8 pb-8 text-center">
-          <div className="flex justify-center mb-6">
-            <div className="relative">
-              <div className="absolute inset-0 bg-red-100 rounded-full animate-pulse" />
-              <AlertCircle className="relative h-16 w-16 text-red-500" />
+    <div className="min-h-screen w-full bg-background text-foreground">
+      <div className="mx-auto flex min-h-screen w-full max-w-xl items-center justify-center px-4">
+        <div className="w-full rounded-2xl border border-border bg-card/70 p-8 text-center backdrop-blur-sm">
+          <div className="mb-6 flex justify-center">
+            <div className="relative rounded-full bg-destructive/10 p-4">
+              <AlertCircle className="h-12 w-12 text-destructive" />
             </div>
           </div>
 
-          <h1 className="text-4xl font-bold text-slate-900 mb-2">404</h1>
+          <h1 className="mb-2 text-5xl font-black tracking-tight text-accent">404</h1>
 
-          <h2 className="text-xl font-semibold text-slate-700 mb-4">
+          <h2 className="mb-3 text-xl font-semibold">
             Page Not Found
           </h2>
 
-          <p className="text-slate-600 mb-8 leading-relaxed">
+          <p className="mb-8 text-foreground/70 leading-relaxed">
             Sorry, the page you are looking for doesn't exist.
             <br />
             It may have been moved or deleted.
@@ -39,14 +37,14 @@ export default function NotFound() {
           >
             <Button
               onClick={handleGoHome}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+              className="bg-accent text-background hover:bg-accent/90 px-6 py-2.5 rounded-lg"
             >
               <Home className="w-4 h-4 mr-2" />
               Go Home
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

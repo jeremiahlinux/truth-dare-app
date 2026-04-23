@@ -91,19 +91,23 @@ export async function getUserByOpenId(openId: string) {
 
 // ============ GAME-SPECIFIC QUERIES ============
 
-export async function createRoom(hostId: number, gameMode: string, roundCount: number, roomCode: string) {
+export async function createRoom(gameMode: string, roundCount: number, roomCode: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const result = await db.insert(rooms).values({
+  await db.insert(rooms).values({
     roomCode,
-    hostId,
     gameMode: gameMode as any,
     roundCount,
     status: "waiting",
   });
 
-  return result;
+  const createdRoom = await getRoomByCode(roomCode);
+  if (!createdRoom) {
+    throw new Error("Failed to create room");
+  }
+
+  return createdRoom;
 }
 
 export async function getRoomByCode(roomCode: string) {
@@ -131,6 +135,32 @@ export async function updateRoomStatus(roomId: number, status: string, currentRo
   if (currentPlayerIndex !== undefined) updates.currentPlayerIndex = currentPlayerIndex;
 
   await db.update(rooms).set(updates).where(eq(rooms.id, roomId));
+}
+
+export async function resetRoomForReplay(roomId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(rooms)
+    .set({
+      status: "waiting",
+      currentRound: 0,
+      currentPlayerIndex: 0,
+    } as any)
+    .where(eq(rooms.id, roomId));
+
+  await db
+    .update(gamePlayers)
+    .set({
+      score: 0,
+      streak: 0,
+      completedCount: 0,
+      passedCount: 0,
+      skippedCount: 0,
+      isReady: 0,
+    })
+    .where(eq(gamePlayers.roomId, roomId));
 }
 
 export async function addGamePlayer(roomId: number, playerName: string, playerIndex: number, userId?: number) {
@@ -190,10 +220,45 @@ export async function createGameSession(roomId: number, round: number, playerTur
     round,
     playerTurnId,
     questionType: questionType as any,
+    status: "pending",
+    promptText: "",
     promptId: promptId || null,
   });
 
   return result;
+}
+
+export async function createQuestionSession(
+  roomId: number,
+  round: number,
+  playerTurnId: number,
+  questionType: "truth" | "dare",
+  promptText: string
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(gameSessions).values({
+    roomId,
+    round,
+    playerTurnId,
+    questionType,
+    status: "pending",
+    promptText,
+  });
+
+  const [session] = await db
+    .select()
+    .from(gameSessions)
+    .where(and(eq(gameSessions.roomId, roomId), eq(gameSessions.round, round), eq(gameSessions.playerTurnId, playerTurnId)))
+    .orderBy(desc(gameSessions.id))
+    .limit(1);
+
+  if (!session) {
+    throw new Error("Failed to create game session");
+  }
+
+  return session;
 }
 
 export async function updateGameSessionAction(sessionId: number, action: string, responseText?: string) {
@@ -204,6 +269,72 @@ export async function updateGameSessionAction(sessionId: number, action: string,
   if (responseText) updates.responseText = responseText;
 
   await db.update(gameSessions).set(updates).where(eq(gameSessions.id, sessionId));
+}
+
+export async function getLatestRoomSession(roomId: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [session] = await db
+    .select()
+    .from(gameSessions)
+    .where(eq(gameSessions.roomId, roomId))
+    .orderBy(desc(gameSessions.id))
+    .limit(1);
+
+  return session ?? null;
+}
+
+export async function getGameSessionById(sessionId: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [session] = await db
+    .select()
+    .from(gameSessions)
+    .where(eq(gameSessions.id, sessionId))
+    .limit(1);
+
+  return session ?? null;
+}
+
+export async function setSessionAwaitingConfirmation(
+  sessionId: number,
+  playerId: number,
+  responseText?: string
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(gameSessions)
+    .set({
+      action: "completed",
+      status: "awaiting_confirmation",
+      performedByPlayerId: playerId,
+      responseText: responseText ?? null,
+    } as any)
+    .where(eq(gameSessions.id, sessionId));
+}
+
+export async function finalizeSession(
+  sessionId: number,
+  status: "completed" | "skipped",
+  action: "completed" | "skipped",
+  confirmedByPlayerId?: number
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(gameSessions)
+    .set({
+      status,
+      action,
+      confirmedByPlayerId: confirmedByPlayerId ?? null,
+      confirmedAt: confirmedByPlayerId ? new Date() : null,
+    } as any)
+    .where(eq(gameSessions.id, sessionId));
 }
 
 export async function storePrompt(gameMode: string, playerCount: number, type: string, text: string) {

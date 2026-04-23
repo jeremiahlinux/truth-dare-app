@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import rateLimit from "express-rate-limit";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -31,11 +32,26 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerStorageProxy(app);
-  registerOAuthRoutes(app);
+  app.set("trust proxy", 1);
+  // Tight body limit: app does not need large payload uploads.
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ limit: "1mb", extended: true }));
+
+  app.use(
+    "/api/trpc",
+    rateLimit({
+      windowMs: 60_000,
+      max: 300,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: "Too many requests, please try again in a minute.",
+    })
+  );
+  const enablePlatformRoutes = process.env.ENABLE_PLATFORM_ROUTES === "true";
+  if (enablePlatformRoutes) {
+    registerStorageProxy(app);
+    registerOAuthRoutes(app);
+  }
   // tRPC API
   app.use(
     "/api/trpc",

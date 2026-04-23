@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { PlayerAvatar } from "@/components/PlayerAvatar";
 import { trpc } from "@/lib/trpc";
 import { Copy, Check, Play } from "lucide-react";
+import { toast } from "sonner";
 
 const GAME_MODE_LABELS: Record<string, string> = {
   classic: "Classic",
@@ -15,12 +16,11 @@ export default function RoomPage() {
   const { roomCode } = useParams<{ roomCode: string }>();
   const [, navigate] = useLocation();
   const [copied, setCopied] = useState(false);
-  const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
 
   // Fetch room data
   const { data: room, isLoading, error } = trpc.game.joinRoom.useQuery(
     { roomCode: roomCode?.toUpperCase() || "" },
-    { enabled: !!roomCode }
+    { enabled: !!roomCode, refetchInterval: 2000 }
   );
 
   const setReadyMutation = trpc.game.setPlayerReady.useMutation();
@@ -53,6 +53,7 @@ export default function RoomPage() {
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode || "");
     setCopied(true);
+    toast.success("Room code copied");
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -74,7 +75,7 @@ export default function RoomPage() {
       navigate(`/game/${room.roomId}`);
     } catch (error) {
       console.error("Failed to start game:", error);
-      alert("Failed to start game. Please try again.");
+      toast.error("Failed to start game. Please try again.");
     }
   };
 
@@ -82,7 +83,7 @@ export default function RoomPage() {
   const gameModeLabel = GAME_MODE_LABELS[room.gameMode] || room.gameMode;
 
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-hidden">
+    <div className="min-h-screen bg-background text-foreground overflow-y-auto">
       {/* Animated background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-pulse" />
@@ -92,8 +93,8 @@ export default function RoomPage() {
       {/* Content */}
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Header */}
-        <div className="border-b border-accent/30 bg-card/50 backdrop-blur-sm p-6">
-          <div className="max-w-6xl mx-auto flex items-center justify-between">
+        <div className="border-b border-accent/30 bg-card/50 backdrop-blur-sm p-4 md:p-6">
+          <div className="max-w-6xl mx-auto flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-3xl font-bold neon-text mb-2">Room: {roomCode}</h1>
               <p className="text-foreground/70">
@@ -121,11 +122,11 @@ export default function RoomPage() {
         </div>
 
         {/* Players Grid */}
-        <div className="flex-1 p-6 md:p-12">
+        <div className="flex-1 p-4 md:p-10">
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-2xl font-bold mb-8">Players ({room.players.length})</h2>
+            <h2 className="text-2xl font-bold mb-6 tracking-tight">Players ({room.players.length})</h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-10">
               {room.players.map((player) => (
                 <div
                   key={player.id}
@@ -134,7 +135,6 @@ export default function RoomPage() {
                       ? "border-accent bg-accent/10 neon-glow-primary"
                       : "border-muted bg-card/50 hover:border-accent/50"
                   }`}
-                  onClick={() => setSelectedPlayerId(selectedPlayerId === player.id ? null : player.id)}
                 >
                   <PlayerAvatar
                     name={player.name}

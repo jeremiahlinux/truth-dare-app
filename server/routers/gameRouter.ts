@@ -1,13 +1,50 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { createRoom, getRoomByCode, getGamePlayersByRoomId, addGamePlayer, updatePlayerReady, getRoomById } from "../db";
-import { generateTruthAndDare } from "../services/promptGenerator";
-import { initializeGame, getGameState, generateNextQuestion, handlePlayerAction, nextPlayerTurn, getCurrentPlayer, getGameResults, cleanupGame } from "../services/gameManager";
+import { initializeGame, getGameState, generateNextQuestion, handlePlayerAction, getCurrentPlayer, getGameResults, cleanupGame, replayGame, confirmPlayerAction } from "../services/gameManager";
 import { nanoid } from "nanoid";
 
 // Generate a unique room code (8 characters)
 function generateRoomCode(): string {
   return nanoid(8).toUpperCase();
+}
+
+function sanitizePlayerName(name: string): string {
+  return name
+    .trim()
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 64);
+}
+
+const rateWindows = new Map<string, number[]>();
+
+function getClientFingerprint(req: any): string {
+  const forwardedFor = req?.headers?.["x-forwarded-for"];
+  const firstForwarded = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : typeof forwardedFor === "string"
+      ? forwardedFor.split(",")[0]
+      : null;
+  const socketIp = req?.socket?.remoteAddress;
+  return String(firstForwarded || socketIp || "unknown-client");
+}
+
+function enforceProcedureRateLimit(
+  req: any,
+  routeKey: string,
+  maxHits: number,
+  windowMs: number
+) {
+  const clientKey = `${routeKey}:${getClientFingerprint(req)}`;
+  const now = Date.now();
+  const previous = rateWindows.get(clientKey) ?? [];
+  const active = previous.filter((ts) => now - ts < windowMs);
+  if (active.length >= maxHits) {
+    throw new Error("Too many requests, please slow down.");
+  }
+  active.push(now);
+  rateWindows.set(clientKey, active);
 }
 
 export const gameRouter = router({
@@ -22,16 +59,21 @@ export const gameRouter = router({
         playerNames: z.array(z.string().min(1).max(64)).min(2).max(8),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      enforceProcedureRateLimit(ctx.req, "createRoom", 12, 60_000);
       const roomCode = generateRoomCode();
-      const hostId = 1; // In a real app, this would be ctx.user.id
-
-      const result = await createRoom(hostId, input.gameMode, input.roundCount, roomCode);
+      const sanitizedPlayerNames = input.playerNames
+        .map(sanitizePlayerName)
+        .filter((name) => name.length > 0);
+      if (sanitizedPlayerNames.length < 2) {
+        throw new Error("At least 2 valid player names are required");
+      }
+      const room = await createRoom(input.gameMode, input.roundCount, roomCode);
 
       // Add players to the room
-      const roomId = (result as any).insertId || 1;
-      for (let i = 0; i < input.playerNames.length; i++) {
-        await addGamePlayer(roomId, input.playerNames[i], i);
+      const roomId = room.id;
+      for (let i = 0; i < sanitizedPlayerNames.length; i++) {
+        await addGamePlayer(roomId, sanitizedPlayerNames[i], i);
       }
 
       return {
@@ -39,7 +81,7 @@ export const gameRouter = router({
         roomCode,
         gameMode: input.gameMode,
         roundCount: input.roundCount,
-        playerCount: input.playerNames.length,
+        playerCount: sanitizedPlayerNames.length,
       };
     }),
 
@@ -47,9 +89,10 @@ export const gameRouter = router({
    * Join an existing room
    */
   joinRoom: publicProcedure
-    .input(z.object({ roomCode: z.string().length(8) }))
-    .query(async ({ input }) => {
-      const room = await getRoomByCode(input.roomCode);
+    .input(z.object({ roomCode: z.string().trim().length(8) }))
+    .query(async ({ input, ctx }) => {
+      enforceProcedureRateLimit(ctx.req, "joinRoom", 60, 60_000);
+      const room = await getRoomByCode(input.roomCode.toUpperCase());
       if (!room) {
         throw new Error("Room not found");
       }
@@ -118,7 +161,8 @@ export const gameRouter = router({
    */
   startGame: publicProcedure
     .input(z.object({ roomId: z.number().int() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      enforceProcedureRateLimit(ctx.req, "startGame", 30, 60_000);
       const gameState = await initializeGame(input.roomId);
       return gameState;
     }),
@@ -128,8 +172,8 @@ export const gameRouter = router({
    */
   getGameState: publicProcedure
     .input(z.object({ roomId: z.number().int() }))
-    .query(({ input }) => {
-      const gameState = getGameState(input.roomId);
+    .query(async ({ input }) => {
+      const gameState = await getGameState(input.roomId);
       return gameState || null;
     }),
 
@@ -137,9 +181,9 @@ export const gameRouter = router({
    * Generate the next question
    */
   getNextQuestion: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.number().int(), questionType: z.enum(["truth", "dare"]).optional() }))
     .mutation(async ({ input }) => {
-      const question = await generateNextQuestion(input.roomId);
+      const question = await generateNextQuestion(input.roomId, input.questionType);
       return question;
     }),
 
@@ -151,19 +195,19 @@ export const gameRouter = router({
       z.object({
         roomId: z.number().int(),
         playerId: z.number().int(),
-        action: z.enum(["completed", "passed", "skipped"]),
+        action: z.enum(["completed", "skipped"]),
         responseText: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      enforceProcedureRateLimit(ctx.req, "submitAction", 90, 60_000);
       await handlePlayerAction(input.roomId, {
         playerId: input.playerId,
         action: input.action,
         responseText: input.responseText,
       });
 
-      nextPlayerTurn(input.roomId);
-      const gameState = getGameState(input.roomId);
+      const gameState = await getGameState(input.roomId);
 
       return {
         success: true,
@@ -171,12 +215,32 @@ export const gameRouter = router({
       };
     }),
 
+  confirmAction: publicProcedure
+    .input(
+      z.object({
+        roomId: z.number().int(),
+        sessionId: z.number().int(),
+        confirmerPlayerId: z.number().int(),
+        approved: z.boolean(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      enforceProcedureRateLimit(ctx.req, "confirmAction", 90, 60_000);
+      const gameState = await confirmPlayerAction(
+        input.roomId,
+        input.sessionId,
+        input.confirmerPlayerId,
+        input.approved
+      );
+      return { success: true, gameState };
+    }),
+
   /**
    * Get current player
    */
   getCurrentPlayer: publicProcedure
     .input(z.object({ roomId: z.number().int() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       return getCurrentPlayer(input.roomId);
     }),
 
@@ -185,7 +249,7 @@ export const gameRouter = router({
    */
   getResults: publicProcedure
     .input(z.object({ roomId: z.number().int() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       return getGameResults(input.roomId);
     }),
 
@@ -197,5 +261,12 @@ export const gameRouter = router({
     .mutation(({ input }) => {
       cleanupGame(input.roomId);
       return { success: true };
+    }),
+
+  replayGame: publicProcedure
+    .input(z.object({ roomId: z.number().int() }))
+    .mutation(async ({ input }) => {
+      const gameState = await replayGame(input.roomId);
+      return gameState;
     }),
 });

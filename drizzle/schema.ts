@@ -31,7 +31,6 @@ export type InsertUser = typeof users.$inferInsert;
 export const rooms = mysqlTable("rooms", {
   id: int("id").autoincrement().primaryKey(),
   roomCode: varchar("roomCode", { length: 8 }).notNull().unique(), // e.g., "ABC123XY"
-  hostId: int("hostId").notNull().references(() => users.id),
   gameMode: mysqlEnum("gameMode", ["classic", "spicy", "party"]).notNull(),
   roundCount: int("roundCount").notNull().default(5),
   status: mysqlEnum("status", ["waiting", "in_progress", "completed"]).notNull().default("waiting"),
@@ -76,8 +75,13 @@ export const gameSessions = mysqlTable("gameSessions", {
   round: int("round").notNull(),
   playerTurnId: int("playerTurnId").notNull().references(() => gamePlayers.id),
   questionType: mysqlEnum("questionType", ["truth", "dare"]).notNull(),
+  status: mysqlEnum("status", ["pending", "awaiting_confirmation", "completed", "skipped"]).notNull().default("pending"),
+  promptText: text("promptText").notNull(),
   promptId: int("promptId").references(() => prompts.id),
   action: mysqlEnum("action", ["completed", "passed", "skipped"]),
+  performedByPlayerId: int("performedByPlayerId").references(() => gamePlayers.id),
+  confirmedByPlayerId: int("confirmedByPlayerId").references(() => gamePlayers.id),
+  confirmedAt: timestamp("confirmedAt"),
   responseText: text("responseText"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

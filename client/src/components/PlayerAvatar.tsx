@@ -24,8 +24,8 @@ export function PlayerAvatar({
 
   const sizeClasses = {
     sm: "w-10 h-10 text-xs",
-    md: "w-16 h-16 text-lg",
-    lg: "w-24 h-24 text-2xl",
+    md: "w-14 h-14 md:w-16 md:h-16 text-base md:text-lg",
+    lg: "w-20 h-20 md:w-24 md:h-24 text-xl md:text-2xl",
   };
 
   const colors = [
@@ -53,7 +53,7 @@ export function PlayerAvatar({
           "flex items-center justify-center rounded-full font-bold text-white transition-all duration-300",
           sizeClasses[size],
           `bg-gradient-to-br ${bgGradient}`,
-          isActive && "ring-2 ring-offset-2 ring-offset-background ring-accent scale-110 animate-pulse-glow"
+          isActive && "ring-2 ring-offset-2 ring-offset-background ring-accent scale-105 animate-pulse-glow"
         )}
       >
         {initials}

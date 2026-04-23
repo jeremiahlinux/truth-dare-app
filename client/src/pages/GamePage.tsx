@@ -1,41 +1,27 @@
 import { useEffect, useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { PlayerAvatar } from "@/components/PlayerAvatar";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { trpc } from "@/lib/trpc";
 import { playSound, resumeAudioContext } from "@/utils/soundEffects";
-import { SkipForward, Volume2, VolumeX } from "lucide-react";
-
-type GamePhase = "spinner" | "choice" | "question" | "action" | "results";
-
-const GAME_MODE_LABELS: Record<string, string> = {
-  classic: "Classic",
-  spicy: "Spicy",
-  party: "Party",
-};
+import { CheckCircle2, SkipForward, Volume2, VolumeX, XCircle } from "lucide-react";
+import { toast } from "sonner";
 
 export default function GamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const [, navigate] = useLocation();
-  const [phase, setPhase] = useState<GamePhase>("spinner");
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [spinning, setSpinning] = useState(false);
-  const [selectedChoice, setSelectedChoice] = useState<"truth" | "dare" | null>(null);
+  const [selectedConfirmerId, setSelectedConfirmerId] = useState<number | null>(null);
 
   // Fetch game state
   const { data: gameState, refetch: refetchGameState } = trpc.game.getGameState.useQuery(
     { roomId: parseInt(roomId || "0") },
-    { enabled: !!roomId, refetchInterval: 1000 }
-  );
-
-  const { data: currentPlayer } = trpc.game.getCurrentPlayer.useQuery(
-    { roomId: parseInt(roomId || "0") },
-    { enabled: !!roomId }
+    { enabled: !!roomId, refetchInterval: 2000 }
   );
 
   const getNextQuestionMutation = trpc.game.getNextQuestion.useMutation();
   const submitActionMutation = trpc.game.submitAction.useMutation();
+  const confirmActionMutation = trpc.game.confirmAction.useMutation();
 
   // Resume audio context on first interaction
   useEffect(() => {
@@ -55,37 +41,33 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
-    if (gameState?.status === "completed") {
-      setPhase("results");
+    if (gameState?.currentQuestion?.status === "awaiting_confirmation") {
+      const options = gameState.players.filter(
+        (p) => p.id !== gameState.currentQuestion?.turnPlayerId
+      );
+      if (!selectedConfirmerId && options.length > 0) {
+        setSelectedConfirmerId(options[0].id);
+      }
     }
-  }, [gameState?.status]);
+  }, [gameState?.currentQuestion, selectedConfirmerId, gameState?.players]);
 
-  const handleSpin = async () => {
-    setSpinning(true);
-    playSound("spin", soundEnabled);
-    // Simulate spinning animation
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    setSpinning(false);
-    playSound("reveal", soundEnabled);
-    setPhase("choice");
-  };
-
-  const handleChoiceSelect = (choice: "truth" | "dare") => {
-    setSelectedChoice(choice);
-    setPhase("question");
-    playSound("select", soundEnabled);
-    fetchQuestion();
-  };
-
-  const fetchQuestion = async () => {
+  const fetchQuestion = async (choice: "truth" | "dare") => {
     try {
-      await getNextQuestionMutation.mutateAsync({ roomId: parseInt(roomId || "0") });
+      await getNextQuestionMutation.mutateAsync({
+        roomId: parseInt(roomId || "0"),
+        questionType: choice,
+      });
+      playSound("select", soundEnabled);
+      await refetchGameState();
     } catch (error) {
       console.error("Failed to fetch question:", error);
+      toast.error("Failed to load question. Try again.");
     }
   };
 
-  const handleAction = async (action: "completed" | "passed" | "skipped") => {
+  const handleAction = async (action: "completed" | "skipped") => {
+    if (!gameState?.players || !gameState.currentQuestion) return;
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (!currentPlayer) return;
 
     try {
@@ -96,15 +78,31 @@ export default function GamePage() {
       });
 
       playSound(action, soundEnabled);
-      setPhase("spinner");
-      setSelectedChoice(null);
       await refetchGameState();
     } catch (error) {
       console.error("Failed to submit action:", error);
+      toast.error("Failed to submit action. Try again.");
     }
   };
 
-  if (!gameState || !currentPlayer) {
+  const handleConfirmation = async (approved: boolean) => {
+    if (!gameState?.currentQuestion || !selectedConfirmerId) return;
+    try {
+      await confirmActionMutation.mutateAsync({
+        roomId: parseInt(roomId || "0"),
+        sessionId: gameState.currentQuestion.sessionId,
+        confirmerPlayerId: selectedConfirmerId,
+        approved,
+      });
+      playSound(approved ? "completed" : "skipped", soundEnabled);
+      await refetchGameState();
+    } catch (error) {
+      console.error("Failed to confirm action:", error);
+      toast.error("Confirmation failed. Try again.");
+    }
+  };
+
+  if (!gameState) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -115,24 +113,48 @@ export default function GamePage() {
     );
   }
 
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  const currentQuestion = gameState.currentQuestion;
+  const isWaitingConfirmation = currentQuestion?.status === "awaiting_confirmation";
+  const canStartChoice =
+    !currentQuestion || ["completed", "skipped"].includes(currentQuestion.status);
+  const confirmerOptions = gameState.players.filter(
+    (p) => p.id !== currentPlayer?.id
+  );
+
+  if (gameState.status === "completed") {
+    return (
+      <div className="min-h-screen bg-background text-foreground overflow-y-auto">
+        <div className="mx-auto flex min-h-screen max-w-4xl flex-col items-center justify-center px-6 py-12 text-center">
+          <h2 className="mb-3 text-4xl font-black tracking-tight text-accent">Game Complete</h2>
+          <p className="mb-8 text-foreground/70">All rounds are done. Check the final rankings.</p>
+          <Button
+            size="lg"
+            className="bg-accent text-background hover:bg-accent/90"
+            onClick={() => navigate(`/results/${roomId}`)}
+          >
+            View Results
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-hidden">
-      {/* Animated background */}
-      <div className="fixed inset-0 z-0">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-secondary/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: "1s" }} />
+    <div className="min-h-screen bg-background text-foreground overflow-y-auto">
+      <div className="fixed inset-0 z-0 opacity-70">
+        <div className="absolute left-1/4 top-0 h-96 w-96 rounded-full bg-accent/10 blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 h-96 w-96 rounded-full bg-secondary/10 blur-3xl" />
       </div>
 
-      {/* Content */}
-      <div className="relative z-10 min-h-screen flex flex-col">
-        {/* Header */}
-        <div className="border-b border-accent/30 bg-card/50 backdrop-blur-sm p-4 md:p-6">
-          <div className="max-w-6xl mx-auto flex items-center justify-between">
+      <div className="relative z-10 min-h-screen">
+        <div className="border-b border-border/70 bg-card/70 backdrop-blur-md">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-4 md:px-8">
             <div>
-              <p className="text-sm text-foreground/70">
+              <p className="text-sm text-foreground/60">
                 Round {gameState.currentRound} of {gameState.totalRounds}
               </p>
-              <h2 className="text-2xl font-bold neon-text">
+              <h2 className="text-2xl font-bold tracking-tight text-accent">
                 {currentPlayer.name}'s Turn
               </h2>
             </div>
@@ -142,7 +164,7 @@ export default function GamePage() {
                 size="sm"
                 variant="outline"
                 onClick={() => setSoundEnabled(!soundEnabled)}
-                className="border-accent text-accent"
+                className="border-accent/40 text-accent hover:bg-accent/10"
               >
                 {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
               </Button>
@@ -150,143 +172,135 @@ export default function GamePage() {
           </div>
         </div>
 
-        {/* Game Content */}
-        <div className="flex-1 flex items-center justify-center p-6">
-          {phase === "spinner" && (
-            <div className="text-center">
-              <h3 className="text-2xl font-bold mb-8">Spin the Bottle!</h3>
-              <div className="mb-12">
-                <div className="w-48 h-48 mx-auto mb-8 relative">
-                  <div
-                    className={`w-full h-full rounded-full border-4 border-accent flex items-center justify-center text-4xl font-bold neon-glow-primary ${
-                      spinning ? "animate-spin-bottle" : ""
-                    }`}
-                  >
-                    🎯
+        <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 md:grid-cols-[1fr_320px] md:px-8">
+          <section className="rounded-2xl border border-border/70 bg-card/60 p-6 backdrop-blur-sm">
+            {canStartChoice && (
+              <div className="text-center">
+                <h3 className="mb-2 text-3xl font-extrabold tracking-tight">Pick Truth or Dare</h3>
+                <p className="mb-8 text-foreground/70">No spinner, no waiting. Keep the energy high.</p>
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <button
+                    onClick={() => fetchQuestion("truth")}
+                    className="group rounded-xl border border-accent/60 bg-accent/10 p-8 text-left transition hover:scale-[1.01] hover:bg-accent/20"
+                    disabled={getNextQuestionMutation.isPending}
+                >
+                    <div className="mb-4 text-5xl">🎭</div>
+                    <h4 className="mb-2 text-2xl font-black tracking-tight text-accent">Truth</h4>
+                    <p className="text-sm text-foreground/70">Answer honestly and let the group decide.</p>
+                </button>
+                <button
+                    onClick={() => fetchQuestion("dare")}
+                    className="group rounded-xl border border-secondary/60 bg-secondary/10 p-8 text-left transition hover:scale-[1.01] hover:bg-secondary/20"
+                    disabled={getNextQuestionMutation.isPending}
+                >
+                    <div className="mb-4 text-5xl">⚡</div>
+                    <h4 className="mb-2 text-2xl font-black tracking-tight text-secondary">Dare</h4>
+                    <p className="text-sm text-foreground/70">Do the challenge, then ask another player to verify.</p>
+                </button>
+                </div>
+              </div>
+            )}
+
+            {currentQuestion && (
+              <div className="mx-auto max-w-2xl animate-scale-pop text-center">
+                <div className="mb-4 text-sm font-semibold uppercase tracking-widest text-foreground/60">
+                  {currentQuestion.type}
+                </div>
+                <div className="mb-8 rounded-2xl border border-accent/40 bg-background/50 p-7 text-left">
+                  <p className="text-2xl font-semibold leading-relaxed">{currentQuestion.text}</p>
+                </div>
+
+                {currentQuestion.status === "pending" && (
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <Button
+                      size="lg"
+                      className="bg-accent px-8 text-background hover:bg-accent/90"
+                      onClick={() => handleAction("completed")}
+                      disabled={submitActionMutation.isPending}
+                    >
+                      <CheckCircle2 className="mr-2 h-5 w-5" />
+                      Mark Done
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="border-secondary/60 text-secondary hover:bg-secondary/10"
+                      onClick={() => handleAction("skipped")}
+                      disabled={submitActionMutation.isPending}
+                    >
+                      <SkipForward className="mr-2 h-5 w-5" />
+                      Skip Turn
+                    </Button>
                   </div>
-                </div>
-              </div>
-              <Button
-                size="lg"
-                className="bg-accent hover:bg-accent/90 text-background font-bold px-12 py-6 neon-glow-primary"
-                onClick={handleSpin}
-                disabled={spinning}
-              >
-                {spinning ? "Spinning..." : "SPIN"}
-              </Button>
-            </div>
-          )}
+                )}
 
-          {phase === "choice" && (
-            <div className="text-center max-w-2xl">
-              <h3 className="text-3xl font-bold mb-12">Choose Your Challenge</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                <button
-                  onClick={() => handleChoiceSelect("truth")}
-                  className="group p-12 rounded-lg border-2 border-accent bg-accent/10 hover:bg-accent/20 transition-all transform hover:scale-105 neon-glow-primary"
-                >
-                  <div className="text-6xl mb-4">🎭</div>
-                  <h4 className="text-2xl font-bold text-accent mb-2">TRUTH</h4>
-                  <p className="text-foreground/70">Answer honestly</p>
-                </button>
-                <button
-                  onClick={() => handleChoiceSelect("dare")}
-                  className="group p-12 rounded-lg border-2 border-secondary bg-secondary/10 hover:bg-secondary/20 transition-all transform hover:scale-105 neon-glow-secondary"
-                >
-                  <div className="text-6xl mb-4">⚡</div>
-                  <h4 className="text-2xl font-bold text-secondary mb-2">DARE</h4>
-                  <p className="text-foreground/70">Accept the challenge</p>
-                </button>
+                {isWaitingConfirmation && (
+                  <div className="rounded-xl border border-border bg-card/40 p-4 text-left">
+                    <p className="mb-3 text-sm font-semibold text-foreground/70">
+                      Another player must confirm this turn before scoring.
+                    </p>
+                    <label className="mb-2 block text-xs uppercase tracking-widest text-foreground/60">
+                      Confirming Player
+                    </label>
+                    <select
+                      className="mb-4 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      value={selectedConfirmerId ?? ""}
+                      onChange={(e) => setSelectedConfirmerId(Number(e.target.value))}
+                    >
+                      {confirmerOptions.map((player) => (
+                        <option key={player.id} value={player.id}>
+                          {player.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex flex-wrap gap-3">
+                      <Button
+                        className="bg-accent text-background hover:bg-accent/90"
+                        onClick={() => handleConfirmation(true)}
+                        disabled={confirmActionMutation.isPending || !selectedConfirmerId}
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Confirm Completed
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                        onClick={() => handleConfirmation(false)}
+                        disabled={confirmActionMutation.isPending || !selectedConfirmerId}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Reject / Skip
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </section>
 
-          {phase === "question" && getNextQuestionMutation.data && (
-            <div className="text-center max-w-2xl animate-scale-pop">
-              <div className="mb-8">
-                <div
-                  className={`inline-block text-6xl mb-6 ${
-                    selectedChoice === "truth" ? "text-accent" : "text-secondary"
-                  }`}
-                >
-                  {selectedChoice === "truth" ? "🎭" : "⚡"}
-                </div>
-              </div>
-              <h3 className="text-2xl font-bold mb-4 uppercase">
-                {selectedChoice}
-              </h3>
-              <div className="bg-card/80 border-2 border-accent/50 rounded-lg p-8 mb-12 neon-glow min-h-32 flex items-center justify-center">
-                <p className="text-2xl font-bold text-foreground leading-relaxed">
-                  {getNextQuestionMutation.data.text}
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button
-                  size="lg"
-                  className="bg-accent hover:bg-accent/90 text-background font-bold px-8 py-6 neon-glow-primary"
-                  onClick={() => handleAction("completed")}
-                  disabled={submitActionMutation.isPending}
-                >
-                  ✓ Complete
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="border-2 border-muted text-foreground hover:bg-muted/20"
-                  onClick={() => handleAction("passed")}
-                  disabled={submitActionMutation.isPending}
-                >
-                  ⏭ Pass
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="border-2 border-secondary text-secondary hover:bg-secondary/20"
-                  onClick={() => handleAction("skipped")}
-                  disabled={submitActionMutation.isPending}
-                >
-                  <SkipForward className="mr-2 w-4 h-4" />
-                  Skip
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {phase === "results" && (
-            <div className="text-center max-w-2xl">
-              <h3 className="text-4xl font-bold mb-12 neon-text">Game Over!</h3>
-              <Button
-                size="lg"
-                className="bg-accent hover:bg-accent/90 text-background font-bold px-12 py-6 neon-glow-primary"
-                onClick={() => navigate(`/results/${roomId}`)}
-              >
-                View Results
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {/* Player Tracker */}
-        <div className="border-t border-accent/30 bg-card/50 backdrop-blur-sm p-4">
-          <div className="max-w-6xl mx-auto">
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+          <aside className="rounded-2xl border border-border/70 bg-card/50 p-4 backdrop-blur-sm">
+            <h4 className="mb-4 text-sm font-bold uppercase tracking-widest text-foreground/60">
+              Live Scoreboard
+            </h4>
+            <div className="space-y-2">
               {gameState.players.map((player, index) => (
                 <div
                   key={player.id}
-                  className={`p-3 rounded-lg text-center text-sm font-bold transition-all ${
+                  className={`rounded-lg p-3 text-sm font-semibold transition ${
                     index === gameState.currentPlayerIndex
-                      ? "bg-accent text-background neon-glow-primary scale-105"
-                      : "bg-muted text-foreground"
+                      ? "scale-[1.01] bg-accent text-background"
+                      : "bg-background/60 text-foreground"
                   }`}
                 >
-                  <p className="truncate">{player.name}</p>
-                  <p className="text-xs opacity-70">{player.score} pts</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate">{player.name}</p>
+                    <p className="text-xs opacity-80">{player.score} pts</p>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+          </aside>
+        </main>
       </div>
     </div>
   );

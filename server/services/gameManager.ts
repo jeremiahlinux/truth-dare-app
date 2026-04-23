@@ -1,7 +1,19 @@
-import { getRoomById, getGamePlayersByRoomId, updateRoomStatus, updatePlayerStats, createGameSession } from "../db";
+import {
+  createQuestionSession,
+  finalizeSession,
+  getGamePlayersByRoomId,
+  getGameSessionById,
+  getLatestRoomSession,
+  getRoomById,
+  resetRoomForReplay,
+  setSessionAwaitingConfirmation,
+  updatePlayerStats,
+  updateRoomStatus,
+} from "../db";
 import { generateTruthAndDare } from "./promptGenerator";
 
 type GameMode = "classic" | "spicy" | "party";
+type SessionStatus = "pending" | "awaiting_confirmation" | "completed" | "skipped";
 
 interface GameState {
   roomId: number;
@@ -11,37 +23,27 @@ interface GameState {
   currentPlayerIndex: number;
   gameMode: GameMode;
   players: any[];
-  currentQuestion?: {
+  currentQuestion: null | {
+    sessionId: number;
     type: "truth" | "dare";
     text: string;
+    status: SessionStatus;
+    turnPlayerId: number;
+    performedByPlayerId: number | null;
+    confirmedByPlayerId: number | null;
   };
 }
 
 interface PlayerAction {
   playerId: number;
-  action: "completed" | "passed" | "skipped";
+  action: "completed" | "skipped";
   responseText?: string;
 }
 
-const gameStates = new Map<number, GameState>();
-
-/**
- * Initialize a game room
- */
-export async function initializeGame(roomId: number): Promise<GameState> {
-  const room = await getRoomById(roomId);
-  if (!room) throw new Error("Room not found");
-
-  const players = await getGamePlayersByRoomId(roomId);
-
-  const gameState: GameState = {
-    roomId,
-    status: "in_progress",
-    currentRound: 1,
-    totalRounds: room.roundCount,
-    currentPlayerIndex: 0,
-    gameMode: room.gameMode as GameMode,
-    players: players.map((p) => ({
+function mapPlayers(players: any[]) {
+  return players
+    .sort((a, b) => a.playerIndex - b.playerIndex)
+    .map((p) => ({
       id: p.id,
       name: p.playerName,
       score: p.score,
@@ -49,119 +51,198 @@ export async function initializeGame(roomId: number): Promise<GameState> {
       completed: p.completedCount,
       passed: p.passedCount,
       skipped: p.skippedCount,
+      isReady: p.isReady === 1,
       isConnected: p.isConnected === 1,
-    })),
+    }));
+}
+
+async function buildGameState(roomId: number): Promise<GameState | undefined> {
+  const room = await getRoomById(roomId);
+  if (!room) return undefined;
+
+  const players = await getGamePlayersByRoomId(roomId);
+  if (players.length === 0) return undefined;
+
+  const latestSession = await getLatestRoomSession(roomId);
+  const currentQuestion =
+    latestSession && latestSession.round === room.currentRound
+      ? {
+          sessionId: latestSession.id,
+          type: latestSession.questionType as "truth" | "dare",
+          text: latestSession.promptText,
+          status: latestSession.status as SessionStatus,
+          turnPlayerId: latestSession.playerTurnId,
+          performedByPlayerId: latestSession.performedByPlayerId ?? null,
+          confirmedByPlayerId: latestSession.confirmedByPlayerId ?? null,
+        }
+      : null;
+
+  return {
+    roomId,
+    status: room.status as GameState["status"],
+    currentRound: room.currentRound,
+    totalRounds: room.roundCount,
+    currentPlayerIndex: room.currentPlayerIndex,
+    gameMode: room.gameMode as GameMode,
+    players: mapPlayers(players),
+    currentQuestion,
   };
+}
 
-  gameStates.set(roomId, gameState);
-  await updateRoomStatus(roomId, "in_progress");
+export async function initializeGame(roomId: number): Promise<GameState> {
+  const room = await getRoomById(roomId);
+  if (!room) throw new Error("Room not found");
 
+  await updateRoomStatus(roomId, "in_progress", 1, 0);
+  const gameState = await buildGameState(roomId);
+  if (!gameState) throw new Error("Failed to initialize game");
   return gameState;
 }
 
-/**
- * Get the current game state
- */
-export function getGameState(roomId: number): GameState | undefined {
-  return gameStates.get(roomId);
+export async function getGameState(roomId: number): Promise<GameState | undefined> {
+  return buildGameState(roomId);
 }
 
-/**
- * Generate and set the next question
- */
-export async function generateNextQuestion(roomId: number): Promise<{ type: "truth" | "dare"; text: string } | null> {
-  const gameState = gameStates.get(roomId);
-  if (!gameState) throw new Error("Game not initialized");
+async function advanceTurn(roomId: number): Promise<void> {
+  const room = await getRoomById(roomId);
+  if (!room) throw new Error("Room not found");
 
-  const playerCount = gameState.players.length;
-  const { truth, dare } = await generateTruthAndDare(gameState.gameMode, playerCount);
+  const players = await getGamePlayersByRoomId(roomId);
+  if (players.length === 0) throw new Error("No players in room");
 
-  // Randomly choose between truth and dare
-  const type = Math.random() > 0.5 ? "truth" : "dare";
-  const text = type === "truth" ? truth : dare;
+  const nextPlayerIndex = (room.currentPlayerIndex + 1) % players.length;
+  let nextRound = room.currentRound;
+  let nextStatus: "in_progress" | "completed" = "in_progress";
 
-  gameState.currentQuestion = { type, text };
-
-  // Store the session in the database
-  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-  await createGameSession(roomId, gameState.currentRound, currentPlayer.id, type);
-
-  return { type, text };
-}
-
-/**
- * Handle player action (complete, pass, skip)
- */
-export async function handlePlayerAction(roomId: number, action: PlayerAction): Promise<void> {
-  const gameState = gameStates.get(roomId);
-  if (!gameState) throw new Error("Game not initialized");
-
-  const player = gameState.players.find((p) => p.id === action.playerId);
-  if (!player) throw new Error("Player not found");
-
-  // Update player stats in the database
-  await updatePlayerStats(action.playerId, action.action);
-
-  // Update local game state
-  if (action.action === "completed") {
-    player.score += 10;
-    player.streak += 1;
-    player.completed += 1;
-  } else if (action.action === "passed") {
-    player.passed += 1;
-    player.streak = 0;
-  } else if (action.action === "skipped") {
-    player.skipped += 1;
-    player.streak = 0;
-  }
-}
-
-/**
- * Move to the next player's turn
- */
-export function nextPlayerTurn(roomId: number): void {
-  const gameState = gameStates.get(roomId);
-  if (!gameState) throw new Error("Game not initialized");
-
-  gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-
-  // If we've cycled through all players, move to the next round
-  if (gameState.currentPlayerIndex === 0) {
-    gameState.currentRound += 1;
-
-    // Check if the game is over
-    if (gameState.currentRound > gameState.totalRounds) {
-      gameState.status = "completed";
-      updateRoomStatus(roomId, "completed");
+  if (nextPlayerIndex === 0) {
+    nextRound += 1;
+    if (nextRound > room.roundCount) {
+      nextStatus = "completed";
     }
   }
 
-  gameState.currentQuestion = undefined;
+  await updateRoomStatus(roomId, nextStatus, nextRound, nextPlayerIndex);
 }
 
-/**
- * Get the current player
- */
-export function getCurrentPlayer(roomId: number) {
-  const gameState = gameStates.get(roomId);
-  if (!gameState) return null;
+export async function generateNextQuestion(
+  roomId: number,
+  preferredType?: "truth" | "dare"
+): Promise<{ sessionId: number; type: "truth" | "dare"; text: string } | null> {
+  const gameState = await getGameState(roomId);
+  if (!gameState || gameState.status !== "in_progress") {
+    throw new Error("Game not initialized");
+  }
 
+  if (gameState.currentQuestion && ["pending", "awaiting_confirmation"].includes(gameState.currentQuestion.status)) {
+    return {
+      sessionId: gameState.currentQuestion.sessionId,
+      type: gameState.currentQuestion.type,
+      text: gameState.currentQuestion.text,
+    };
+  }
+
+  const playerCount = gameState.players.length;
+  const { truth, dare } = await generateTruthAndDare(gameState.gameMode, playerCount);
+  const type = preferredType ?? (Math.random() > 0.5 ? "truth" : "dare");
+  const text = type === "truth" ? truth : dare;
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+  const session = await createQuestionSession(
+    roomId,
+    gameState.currentRound,
+    currentPlayer.id,
+    type,
+    text
+  );
+
+  return { sessionId: session.id, type, text };
+}
+
+export async function handlePlayerAction(roomId: number, action: PlayerAction): Promise<void> {
+  const gameState = await getGameState(roomId);
+  if (!gameState || gameState.status !== "in_progress") throw new Error("Game not initialized");
+
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  if (!currentPlayer || currentPlayer.id !== action.playerId) {
+    throw new Error("Only the current player can submit an action");
+  }
+
+  const currentQuestion = gameState.currentQuestion;
+  if (!currentQuestion || currentQuestion.turnPlayerId !== action.playerId) {
+    throw new Error("No active question for the current player");
+  }
+
+  const session = await getGameSessionById(currentQuestion.sessionId);
+  if (!session) throw new Error("Active session not found");
+  if (!["pending", "awaiting_confirmation"].includes(session.status)) {
+    throw new Error("This turn is already resolved");
+  }
+
+  if (action.action === "completed") {
+    await setSessionAwaitingConfirmation(session.id, action.playerId, action.responseText);
+    return;
+  }
+
+  await finalizeSession(session.id, "skipped", "skipped");
+  await updatePlayerStats(action.playerId, "skipped");
+  await advanceTurn(roomId);
+}
+
+export async function confirmPlayerAction(
+  roomId: number,
+  sessionId: number,
+  confirmerPlayerId: number,
+  approved: boolean
+) {
+  const gameState = await getGameState(roomId);
+  if (!gameState || gameState.status !== "in_progress") {
+    throw new Error("Game is not active");
+  }
+
+  const session = await getGameSessionById(sessionId);
+  if (!session || session.roomId !== roomId) {
+    throw new Error("Session not found");
+  }
+  if (session.status !== "awaiting_confirmation") {
+    throw new Error("Session is not awaiting confirmation");
+  }
+
+  if (session.playerTurnId === confirmerPlayerId) {
+    throw new Error("Current player cannot confirm their own turn");
+  }
+
+  if (!gameState.players.some((p) => p.id === confirmerPlayerId)) {
+    throw new Error("Confirmer is not in this room");
+  }
+
+  if (approved) {
+    await finalizeSession(sessionId, "completed", "completed", confirmerPlayerId);
+    await updatePlayerStats(session.playerTurnId, "completed");
+  } else {
+    await finalizeSession(sessionId, "skipped", "skipped", confirmerPlayerId);
+    await updatePlayerStats(session.playerTurnId, "skipped");
+  }
+
+  await advanceTurn(roomId);
+  return getGameState(roomId);
+}
+
+export async function getCurrentPlayer(roomId: number) {
+  const gameState = await getGameState(roomId);
+  if (!gameState) return null;
   return gameState.players[gameState.currentPlayerIndex];
 }
 
-/**
- * Get game results (for game over screen)
- */
-export function getGameResults(roomId: number) {
-  const gameState = gameStates.get(roomId);
+export async function getGameResults(roomId: number) {
+  const gameState = await getGameState(roomId);
   if (!gameState) return null;
 
-  // Sort players by score
-  const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score);
+  const sortedPlayers = [...gameState.players].sort((a, b) => {
+    if (b.score === a.score) return b.completed - a.completed;
+    return b.score - a.score;
+  });
 
-  // Find MVP (highest score)
   const mvp = sortedPlayers[0];
-
   return {
     finalScores: sortedPlayers,
     mvp: {
@@ -174,22 +255,15 @@ export function getGameResults(roomId: number) {
   };
 }
 
-/**
- * Clean up game state when room is deleted
- */
-export function cleanupGame(roomId: number): void {
-  gameStates.delete(roomId);
+export function cleanupGame(_roomId: number): void {
+  // DB-authoritative state; no in-memory cleanup needed.
 }
 
-/**
- * Update player connection status
- */
-export function updatePlayerConnection(roomId: number, playerId: number, isConnected: boolean): void {
-  const gameState = gameStates.get(roomId);
-  if (!gameState) return;
+export async function replayGame(roomId: number): Promise<GameState> {
+  await resetRoomForReplay(roomId);
+  return initializeGame(roomId);
+}
 
-  const player = gameState.players.find((p) => p.id === playerId);
-  if (player) {
-    player.isConnected = isConnected;
-  }
+export function updatePlayerConnection(_roomId: number, _playerId: number, _isConnected: boolean): void {
+  // No-op for now. Connection state is polled from DB snapshot.
 }

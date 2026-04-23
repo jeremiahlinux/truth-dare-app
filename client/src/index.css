@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -83,41 +82,6 @@
   --sidebar-ring: oklch(0.7 0.28 290);
 }
 
-.dark {
-  --primary: oklch(0.65 0.25 290);
-  --primary-foreground: oklch(0.95 0.01 290);
-  --sidebar-primary: oklch(0.65 0.25 290);
-  --sidebar-primary-foreground: oklch(0.95 0.01 290);
-  --background: oklch(0.08 0.01 290);
-  --foreground: oklch(0.95 0.01 290);
-  --card: oklch(0.12 0.02 290);
-  --card-foreground: oklch(0.95 0.01 290);
-  --popover: oklch(0.12 0.02 290);
-  --popover-foreground: oklch(0.95 0.01 290);
-  --secondary: oklch(0.65 0.28 30);
-  --secondary-foreground: oklch(0.95 0.01 290);
-  --muted: oklch(0.2 0.03 290);
-  --muted-foreground: oklch(0.7 0.05 290);
-  --accent: oklch(0.7 0.28 290);
-  --accent-foreground: oklch(0.08 0.01 290);
-  --destructive: oklch(0.65 0.28 30);
-  --destructive-foreground: oklch(0.95 0.01 290);
-  --border: oklch(0.2 0.03 290);
-  --input: oklch(0.15 0.02 290);
-  --ring: oklch(0.7 0.28 290);
-  --chart-1: oklch(0.7 0.28 290);
-  --chart-2: oklch(0.65 0.28 30);
-  --chart-3: oklch(0.65 0.25 290);
-  --chart-4: oklch(0.6 0.22 290);
-  --chart-5: oklch(0.55 0.2 290);
-  --sidebar: oklch(0.12 0.02 290);
-  --sidebar-foreground: oklch(0.95 0.01 290);
-  --sidebar-accent: oklch(0.65 0.25 290);
-  --sidebar-accent-foreground: oklch(0.95 0.01 290);
-  --sidebar-border: oklch(0.2 0.03 290);
-  --sidebar-ring: oklch(0.7 0.28 290);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -170,11 +134,6 @@
     margin-right: auto;
     padding-left: 1rem;
     padding-right: 1rem;
-  }
-
-  .flex {
-    min-height: 0;
-    min-width: 0;
   }
 
   @media (min-width: 640px) {
@@ -266,4 +225,14 @@
 
 .animate-scale-pop {
   animation: scale-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-glow,
+  .animate-spin-bottle,
+  .animate-slide-up,
+  .animate-fade-in,
+  .animate-scale-pop {
+    animation: none !important;
+  }
 }

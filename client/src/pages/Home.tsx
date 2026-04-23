@@ -3,9 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useRoute, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Zap, Users } from "lucide-react";
+import { toast } from "sonner";
 
 const GAME_MODES = [
   { value: "classic", label: "Classic" },
@@ -49,7 +50,7 @@ export default function Home() {
   const handleCreateRoom = async () => {
     const validNames = playerNames.filter((name) => name.trim().length > 0);
     if (validNames.length < 2) {
-      alert("Please enter at least 2 player names");
+      toast.error("Please enter at least 2 player names");
       return;
     }
 
@@ -63,13 +64,13 @@ export default function Home() {
       navigate(`/room/${result.roomCode}`);
     } catch (error) {
       console.error("Failed to create room:", error);
-      alert("Failed to create room. Please try again.");
+      toast.error("Failed to create room. Please try again.");
     }
   };
 
   const handleJoinRoom = async () => {
     if (roomCode.trim().length !== 8) {
-      alert("Please enter a valid room code");
+      toast.error("Please enter a valid room code");
       return;
     }
 
@@ -80,14 +81,14 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Failed to join room:", error);
-      alert("Room not found. Please check the code and try again.");
+      toast.error("Room not found. Please check the code and try again.");
     }
   };
 
   const gameModeLabel = GAME_MODES.find((m) => m.value === gameMode)?.label || gameMode;
 
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-hidden">
+    <div className="min-h-screen bg-background text-foreground overflow-y-auto">
       {/* Animated background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-background" />
@@ -96,14 +97,14 @@ export default function Home() {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-12">
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-10 md:py-14">
         {/* Hero Section */}
         <div className="text-center mb-12 animate-slide-up">
           {/* Logo/Title */}
-          <div className="mb-8">
+          <div className="mb-6 md:mb-8">
             <div className="inline-flex items-center justify-center gap-3 mb-6">
               <Zap className="w-12 h-12 text-accent animate-pulse-glow" />
-              <h1 className="text-5xl md:text-7xl font-black neon-text">
+              <h1 className="text-4xl md:text-7xl font-black neon-text tracking-tight">
                 TRUTH OR DARE
               </h1>
               <Zap className="w-12 h-12 text-secondary animate-pulse-glow" style={{ animationDelay: "0.5s" }} />
@@ -114,7 +115,7 @@ export default function Home() {
           </div>
 
           {/* Subtitle */}
-          <p className="text-lg md:text-xl text-foreground/80 max-w-2xl mx-auto mb-12 leading-relaxed">
+          <p className="text-base md:text-xl text-foreground/80 max-w-2xl mx-auto mb-10 md:mb-12 leading-relaxed">
             The ultimate multiplayer party game. Challenge your friends with truth questions and daring dares in real-time.
           </p>
 
@@ -140,7 +141,7 @@ export default function Home() {
           </div>
 
           {/* Features Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-4xl mx-auto">
             {[
               { title: "Real-Time", desc: "Play with friends instantly" },
               { title: "AI-Powered", desc: "Fresh prompts every round" },

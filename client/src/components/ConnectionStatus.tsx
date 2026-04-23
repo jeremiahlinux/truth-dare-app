@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Wifi, WifiOff } from "lucide-react";
 
-type ConnectionStatus = "connected" | "connecting" | "disconnected";
+type ConnectionStatus = "connected" | "disconnected";
 
 export function ConnectionStatus() {
   const [status, setStatus] = useState<ConnectionStatus>("connected");
@@ -24,17 +24,17 @@ export function ConnectionStatus() {
 
   if (status === "connected") {
     return (
-      <div className="flex items-center gap-2 text-sm text-foreground/70">
-        <Wifi className="w-4 h-4 text-accent animate-pulse" />
-        <span>Connected</span>
+      <div className="flex items-center gap-2 text-xs sm:text-sm text-foreground/70">
+        <Wifi className="w-4 h-4 text-accent" />
+        <span>Online</span>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 text-sm text-destructive">
+    <div className="flex items-center gap-2 text-xs sm:text-sm text-destructive">
       <WifiOff className="w-4 h-4" />
-      <span>Disconnected</span>
+      <span>Offline</span>
     </div>
   );
 }
