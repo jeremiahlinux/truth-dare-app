@@ -211,7 +211,7 @@ export async function confirmPlayerAction(
   }
 
   if (session.playerTurnId === confirmerPlayerId) {
-    throw new Error("Current player cannot confirm their own turn");
+    throw new Error(`Current player (${confirmerPlayerId}) cannot confirm their own turn`);
   }
 
   if (!gameState.players.some((p) => p.id === confirmerPlayerId)) {

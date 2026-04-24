@@ -96,16 +96,28 @@ export default function GamePage() {
   };
 
   const handleConfirmation = async (approved: boolean) => {
-    if (!gameState?.currentQuestion || !selectedConfirmerId) return;
+    if (!gameState?.currentQuestion || !actualLocalPlayerId) {
+      console.warn("Cannot confirm: missing question or local player ID", { currentQuestion: gameState?.currentQuestion, actualLocalPlayerId });
+      return;
+    }
+
+    console.log("Sending confirmation:", {
+      roomId,
+      sessionId: gameState.currentQuestion.sessionId,
+      approved,
+      playerId: actualLocalPlayerId,
+    });
+
     try {
       await confirmActionMutation.mutateAsync({
         roomId: roomId || "",
         sessionId: gameState.currentQuestion.sessionId,
-        confirmerPlayerId: selectedConfirmerId,
+        confirmerPlayerId: actualLocalPlayerId,
         approved,
       });
       playSound(approved ? "completed" : "skipped", soundEnabled);
       await refetchGameState();
+      toast.success(approved ? "Action confirmed!" : "Action rejected");
     } catch (error) {
       console.error("Failed to confirm action:", error);
       toast.error("Confirmation failed. Try again.");
@@ -129,10 +141,23 @@ export default function GamePage() {
   const isWaitingConfirmation = currentQuestion?.status === "awaiting_confirmation";
   const canStartChoice =
     !currentQuestion || ["completed", "skipped"].includes(currentQuestion.status);
-  const confirmerOptions = gameState.players.filter(
-    (p) => p.id !== currentPlayer?.id
-  );
-  const isIConfirmer = actualLocalPlayerId !== currentPlayer?.id && actualLocalPlayerId !== null;
+  
+  // A bystander is anyone in the room who is NOT the person currently taking the turn
+  const isIConfirmer = 
+    actualLocalPlayerId !== null && 
+    currentPlayer !== undefined && 
+    actualLocalPlayerId !== currentPlayer.id;
+
+  // Debug log to trace IDs
+  console.log("Turn Debug:", {
+    actualLocalPlayerId,
+    currentPlayerId: currentPlayer?.id,
+    currentPlayerName: currentPlayer?.name,
+    isMyTurn,
+    isIConfirmer,
+    sessionTurnPlayerId: currentQuestion?.turnPlayerId,
+    isWaitingConfirmation
+  });
 
   if (gameState.status === "completed") {
     return (
