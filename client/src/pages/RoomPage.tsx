@@ -194,7 +194,7 @@ export default function RoomPage() {
                       }}
                       disabled={setReadyMutation.isPending}
                     >
-                      {player.isReady ? "✓ Ready" : "Set Ready"}
+                      {setReadyMutation.isPending ? "Updating..." : (player.isReady ? "✓ Ready" : "Set Ready")}
                     </Button>
                   ) : !localPlayerId ? (
                     <Button
