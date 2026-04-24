@@ -1,5 +1,6 @@
 import { Redis } from "@upstash/redis";
 import { ENV } from "./env.js";
+import crypto from "node:crypto";
 
 const ROOM_TTL = 24 * 60 * 60; // 24 hours
 const SESSION_TTL = 12 * 60 * 60; // 12 hours
@@ -92,7 +93,7 @@ export async function createRoom(roomCode: string, gameMode: string, roundCount:
   const roomIdKey = `room-id:${roomCode}`;
 
   // Store both by code and by ID for quick lookups
-  await redis.setex(roomKey, ROOM_TTL, JSON.stringify(room));
+  await redis.setex(roomKey, ROOM_TTL, room);
   await redis.setex(roomIdKey, ROOM_TTL, roomId);
 
   return room;
@@ -102,7 +103,7 @@ export async function getRoomByCode(roomCode: string): Promise<Room | null> {
   const redis = getRedis();
   const data = await redis.get(`room:${roomCode}`);
   if (!data) return null;
-  return JSON.parse(data as string);
+  return data as Room;
 }
 
 export async function getRoomById(roomId: string): Promise<Room | null> {
@@ -130,13 +131,13 @@ export async function updateRoomStatus(
   for (const key of allKeys) {
     const roomData = await redis.get(key);
     if (!roomData) continue;
-    const room = JSON.parse(roomData as string);
+    const room = roomData as Room;
     if (room.id === roomId) {
       room.status = status;
       if (currentRound !== undefined) room.currentRound = currentRound;
       if (currentPlayerIndex !== undefined) room.currentPlayerIndex = currentPlayerIndex;
       room.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, JSON.stringify(room));
+      await redis.setex(key, ROOM_TTL, room);
       return;
     }
   }
@@ -150,20 +151,20 @@ export async function resetRoomForReplay(roomId: string): Promise<void> {
   for (const key of allKeys) {
     const roomData = await redis.get(key);
     if (!roomData) continue;
-    const room = JSON.parse(roomData as string);
+    const room = roomData as Room;
     if (room.id === roomId) {
       room.status = "waiting";
       room.currentRound = 0;
       room.currentPlayerIndex = 0;
       room.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, JSON.stringify(room));
+      await redis.setex(key, ROOM_TTL, room);
       
       // Reset all players in this room
       const playerKeys = await redis.keys(`players:${roomId}:*`);
       for (const pKey of playerKeys) {
         const playerData = await redis.get(pKey);
         if (!playerData) continue;
-        const player = JSON.parse(playerData as string);
+        const player = playerData as GamePlayer;
         player.score = 0;
         player.streak = 0;
         player.completedCount = 0;
@@ -171,7 +172,7 @@ export async function resetRoomForReplay(roomId: string): Promise<void> {
         player.skippedCount = 0;
         player.isReady = false;
         player.updatedAt = Date.now();
-        await redis.setex(pKey, ROOM_TTL, JSON.stringify(player));
+        await redis.setex(pKey, ROOM_TTL, player);
       }
       return;
     }
@@ -208,7 +209,7 @@ export async function addGamePlayer(
   };
 
   const key = `players:${roomId}:${playerId}`;
-  await redis.setex(key, ROOM_TTL, JSON.stringify(player));
+  await redis.setex(key, ROOM_TTL, player);
 
   return player;
 }
@@ -221,7 +222,7 @@ export async function getGamePlayersByRoomId(roomId: string): Promise<GamePlayer
   for (const key of keys) {
     const data = await redis.get(key);
     if (data) {
-      players.push(JSON.parse(data as string));
+      players.push(data as GamePlayer);
     }
   }
 
@@ -235,11 +236,11 @@ export async function updatePlayerReady(playerId: string, isReady: boolean): Pro
   for (const key of allKeys) {
     const data = await redis.get(key);
     if (!data) continue;
-    const player = JSON.parse(data as string);
+    const player = data as GamePlayer;
     if (player.id === playerId) {
       player.isReady = isReady;
       player.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, JSON.stringify(player));
+      await redis.setex(key, ROOM_TTL, player);
       return;
     }
   }
@@ -256,7 +257,7 @@ export async function updatePlayerStats(
   for (const key of allKeys) {
     const data = await redis.get(key);
     if (!data) continue;
-    const player = JSON.parse(data as string);
+    const player = data as GamePlayer;
     if (player.id === playerId) {
       if (action === "completed") {
         player.completedCount += 1;
@@ -270,7 +271,7 @@ export async function updatePlayerStats(
         player.streak = 0;
       }
       player.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, JSON.stringify(player));
+      await redis.setex(key, ROOM_TTL, player);
       return;
     }
   }
@@ -302,7 +303,7 @@ export async function createQuestionSession(
   };
 
   const key = `session:${roomId}:${sessionId}`;
-  await redis.setex(key, SESSION_TTL, JSON.stringify(session));
+  await redis.setex(key, SESSION_TTL, session);
 
   return session;
 }
@@ -315,7 +316,7 @@ export async function getLatestRoomSession(roomId: string): Promise<GameSession 
   for (const key of keys) {
     const data = await redis.get(key);
     if (data) {
-      const session = JSON.parse(data as string);
+      const session = data as GameSession;
       if (!latest || session.createdAt > latest.createdAt) {
         latest = session;
       }
@@ -332,7 +333,7 @@ export async function getGameSessionById(sessionId: string): Promise<GameSession
   for (const key of allKeys) {
     const data = await redis.get(key);
     if (!data) continue;
-    const session = JSON.parse(data as string);
+    const session = data as GameSession;
     if (session.id === sessionId) {
       return session;
     }
@@ -352,14 +353,14 @@ export async function setSessionAwaitingConfirmation(
   for (const key of allKeys) {
     const data = await redis.get(key);
     if (!data) continue;
-    const session = JSON.parse(data as string);
+    const session = data as GameSession;
     if (session.id === sessionId) {
       session.action = "completed";
       session.status = "awaiting_confirmation";
       session.performedByPlayerId = playerId;
       session.responseText = responseText ?? null;
       session.updatedAt = Date.now();
-      await redis.setex(key, SESSION_TTL, JSON.stringify(session));
+      await redis.setex(key, SESSION_TTL, session);
       return;
     }
   }
@@ -378,14 +379,14 @@ export async function finalizeSession(
   for (const key of allKeys) {
     const data = await redis.get(key);
     if (!data) continue;
-    const session = JSON.parse(data as string);
+    const session = data as GameSession;
     if (session.id === sessionId) {
       session.status = status;
       session.action = action;
       session.confirmedByPlayerId = confirmedByPlayerId ?? null;
       session.confirmedAt = confirmedByPlayerId ? Date.now() : null;
       session.updatedAt = Date.now();
-      await redis.setex(key, SESSION_TTL, JSON.stringify(session));
+      await redis.setex(key, SESSION_TTL, session);
       return;
     }
   }
@@ -399,7 +400,7 @@ export async function getRoomCodeForId(roomId: string): Promise<string | null> {
   for (const key of keys) {
     const data = await redis.get(key);
     if (!data) continue;
-    const room = JSON.parse(data as string);
+    const room = data as Room;
     if (room.id === roomId) {
       return room.roomCode;
     }
