@@ -150,9 +150,13 @@ export const gameRouter = router({
    * Mark a player as ready
    */
   setPlayerReady: publicProcedure
-    .input(z.object({ playerId: z.string().uuid(), isReady: z.boolean() }))
+    .input(z.object({ 
+      roomId: z.string().uuid(),
+      playerId: z.string().uuid(), 
+      isReady: z.boolean() 
+    }))
     .mutation(async ({ input }) => {
-      await updatePlayerReady(input.playerId, input.isReady);
+      await updatePlayerReady(input.roomId, input.playerId, input.isReady);
       return { success: true };
     }),
 

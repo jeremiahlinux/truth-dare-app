@@ -83,6 +83,7 @@ export default function RoomPage() {
     if (player) {
       try {
         await setReadyMutation.mutateAsync({
+          roomId: room.roomId,
           playerId,
           isReady: !player.isReady,
         });

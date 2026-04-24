@@ -223,22 +223,18 @@ export async function getGamePlayersByRoomId(roomId: string): Promise<GamePlayer
   return players.sort((a, b) => a.playerIndex - b.playerIndex);
 }
 
-export async function updatePlayerReady(playerId: string, isReady: boolean): Promise<void> {
+export async function updatePlayerReady(roomId: string, playerId: string, isReady: boolean): Promise<void> {
   const redis = getRedis();
-  const allKeys = await redis.keys("players:*:*");
-
-  for (const key of allKeys) {
-    const data = await redis.get(key);
-    if (!data) continue;
-    const player = data as GamePlayer;
-    if (player.id === playerId) {
-      player.isReady = isReady;
-      player.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, player);
-      return;
-    }
-  }
-  throw new Error(`Player ${playerId} not found`);
+  const key = `players:${roomId}:${playerId}`;
+  
+  const data = await redis.get(key);
+  if (!data) throw new Error(`Player ${playerId} not found in room ${roomId}`);
+  
+  const player = data as GamePlayer;
+  player.isReady = isReady;
+  player.updatedAt = Date.now();
+  
+  await redis.setex(key, ROOM_TTL, player);
 }
 
 export async function updatePlayerStats(
