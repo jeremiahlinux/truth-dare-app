@@ -286,4 +286,12 @@ export const gameRouter = router({
       const gameState = await replayGame(input.roomId);
       return gameState;
     }),
+
+  backToLobby: publicProcedure
+    .input(z.object({ roomId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      await resetRoomForReplay(input.roomId);
+      const roomCode = await getRoomCodeForId(input.roomId);
+      return { success: true, roomCode };
+    }),
 });

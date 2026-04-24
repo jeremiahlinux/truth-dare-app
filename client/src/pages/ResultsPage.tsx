@@ -16,6 +16,7 @@ export default function ResultsPage() {
 
   const endGameMutation = trpc.game.endGame.useMutation();
   const replayGameMutation = trpc.game.replayGame.useMutation();
+  const backToLobbyMutation = trpc.game.backToLobby.useMutation();
 
   if (isLoading) {
     return (
@@ -55,11 +56,16 @@ export default function ResultsPage() {
 
   const handleNewGame = async () => {
     try {
-      await endGameMutation.mutateAsync({ roomId: parseInt(roomId || "0") });
-      navigate("/");
+      const res = await backToLobbyMutation.mutateAsync({ roomId: roomId || "" });
+      if (res.roomCode) {
+        navigate(`/room/${res.roomCode}`);
+        toast.success("Back to lobby!");
+      } else {
+        navigate("/");
+      }
     } catch (error) {
-      console.error("Failed to close game:", error);
-      toast.error("Failed to close game. Please try again.");
+      console.error("Failed to return to lobby:", error);
+      navigate("/");
     }
   };
 
@@ -176,10 +182,10 @@ export default function ResultsPage() {
             variant="outline"
             className="border-2 border-secondary text-secondary hover:bg-secondary/10 font-bold px-8 py-6 rounded-lg"
             onClick={handleNewGame}
-            disabled={endGameMutation.isPending}
+            disabled={backToLobbyMutation.isPending}
           >
             <Home className="mr-2 w-6 h-6" />
-            {endGameMutation.isPending ? "Closing..." : "New Game"}
+            {backToLobbyMutation.isPending ? "Returning..." : "Back to Lobby"}
           </Button>
         </div>
       </div>
