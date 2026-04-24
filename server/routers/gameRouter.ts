@@ -108,7 +108,7 @@ export const gameRouter = router({
         players: players.map((p) => ({
           id: p.id,
           name: p.playerName,
-          isReady: p.isReady === 1,
+          isReady: p.isReady,
           score: p.score,
         })),
       };
@@ -118,7 +118,7 @@ export const gameRouter = router({
    * Get room details
    */
   getRoom: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .query(async ({ input }) => {
       const room = await getRoomById(input.roomId);
       if (!room) {
@@ -138,7 +138,7 @@ export const gameRouter = router({
         players: players.map((p) => ({
           id: p.id,
           name: p.playerName,
-          isReady: p.isReady === 1,
+          isReady: p.isReady,
           score: p.score,
           streak: p.streak,
           completed: p.completedCount,
@@ -150,7 +150,7 @@ export const gameRouter = router({
    * Mark a player as ready
    */
   setPlayerReady: publicProcedure
-    .input(z.object({ playerId: z.number().int(), isReady: z.boolean() }))
+    .input(z.object({ playerId: z.string().uuid(), isReady: z.boolean() }))
     .mutation(async ({ input }) => {
       await updatePlayerReady(input.playerId, input.isReady);
       return { success: true };
@@ -160,7 +160,7 @@ export const gameRouter = router({
    * Start the game
    */
   startGame: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       enforceProcedureRateLimit(ctx.req, "startGame", 30, 60_000);
       const gameState = await initializeGame(input.roomId);
@@ -171,7 +171,7 @@ export const gameRouter = router({
    * Get current game state
    */
   getGameState: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .query(async ({ input }) => {
       const gameState = await getGameState(input.roomId);
       return gameState || null;
@@ -181,7 +181,7 @@ export const gameRouter = router({
    * Generate the next question
    */
   getNextQuestion: publicProcedure
-    .input(z.object({ roomId: z.number().int(), questionType: z.enum(["truth", "dare"]).optional() }))
+    .input(z.object({ roomId: z.string().uuid(), questionType: z.enum(["truth", "dare"]).optional() }))
     .mutation(async ({ input }) => {
       const question = await generateNextQuestion(input.roomId, input.questionType);
       return question;
@@ -193,8 +193,8 @@ export const gameRouter = router({
   submitAction: publicProcedure
     .input(
       z.object({
-        roomId: z.number().int(),
-        playerId: z.number().int(),
+        roomId: z.string().uuid(),
+        playerId: z.string().uuid(),
         action: z.enum(["completed", "skipped"]),
         responseText: z.string().optional(),
       })
@@ -218,9 +218,9 @@ export const gameRouter = router({
   confirmAction: publicProcedure
     .input(
       z.object({
-        roomId: z.number().int(),
-        sessionId: z.number().int(),
-        confirmerPlayerId: z.number().int(),
+        roomId: z.string().uuid(),
+        sessionId: z.string().uuid(),
+        confirmerPlayerId: z.string().uuid(),
         approved: z.boolean(),
       })
     )
@@ -239,7 +239,7 @@ export const gameRouter = router({
    * Get current player
    */
   getCurrentPlayer: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .query(async ({ input }) => {
       return getCurrentPlayer(input.roomId);
     }),
@@ -248,7 +248,7 @@ export const gameRouter = router({
    * Get game results (for game over screen)
    */
   getResults: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .query(async ({ input }) => {
       return getGameResults(input.roomId);
     }),
@@ -257,14 +257,14 @@ export const gameRouter = router({
    * End the game and cleanup
    */
   endGame: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .mutation(({ input }) => {
       cleanupGame(input.roomId);
       return { success: true };
     }),
 
   replayGame: publicProcedure
-    .input(z.object({ roomId: z.number().int() }))
+    .input(z.object({ roomId: z.string().uuid() }))
     .mutation(async ({ input }) => {
       const gameState = await replayGame(input.roomId);
       return gameState;

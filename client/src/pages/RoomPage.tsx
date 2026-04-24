@@ -57,7 +57,7 @@ export default function RoomPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleToggleReady = async (playerId: number) => {
+  const handleToggleReady = async (playerId: string) => {
     const player = room.players.find((p) => p.id === playerId);
     if (player) {
       await setReadyMutation.mutateAsync({

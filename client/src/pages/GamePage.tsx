@@ -11,11 +11,11 @@ export default function GamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const [, navigate] = useLocation();
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [selectedConfirmerId, setSelectedConfirmerId] = useState<number | null>(null);
+  const [selectedConfirmerId, setSelectedConfirmerId] = useState<string | null>(null);
 
   // Fetch game state
   const { data: gameState, refetch: refetchGameState } = trpc.game.getGameState.useQuery(
-    { roomId: parseInt(roomId || "0") },
+    { roomId: roomId || "" },
     { enabled: !!roomId, refetchInterval: 2000 }
   );
 
@@ -54,7 +54,7 @@ export default function GamePage() {
   const fetchQuestion = async (choice: "truth" | "dare") => {
     try {
       await getNextQuestionMutation.mutateAsync({
-        roomId: parseInt(roomId || "0"),
+        roomId: roomId || "",
         questionType: choice,
       });
       playSound("select", soundEnabled);
@@ -72,7 +72,7 @@ export default function GamePage() {
 
     try {
       await submitActionMutation.mutateAsync({
-        roomId: parseInt(roomId || "0"),
+        roomId: roomId || "",
         playerId: currentPlayer.id,
         action,
       });
@@ -89,7 +89,7 @@ export default function GamePage() {
     if (!gameState?.currentQuestion || !selectedConfirmerId) return;
     try {
       await confirmActionMutation.mutateAsync({
-        roomId: parseInt(roomId || "0"),
+        roomId: roomId || "",
         sessionId: gameState.currentQuestion.sessionId,
         confirmerPlayerId: selectedConfirmerId,
         approved,

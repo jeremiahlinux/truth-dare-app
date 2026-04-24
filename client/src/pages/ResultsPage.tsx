@@ -10,7 +10,7 @@ export default function ResultsPage() {
   const [, navigate] = useLocation();
 
   const { data: results, isLoading } = trpc.game.getResults.useQuery(
-    { roomId: parseInt(roomId || "0") },
+    { roomId: roomId || "" },
     { enabled: !!roomId }
   );
 
@@ -43,7 +43,7 @@ export default function ResultsPage() {
 
   const handlePlayAgain = async () => {
     try {
-      const id = parseInt(roomId || "0");
+      const id = roomId || "";
       await replayGameMutation.mutateAsync({ roomId: id });
       navigate(`/game/${id}`);
       toast.success("New game started with same players");

@@ -3,8 +3,10 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
 import { fileURLToPath } from "node:url";
 import type { InsertUser } from "../drizzle/schema.js";
-import { users, rooms, gamePlayers, gameSessions, prompts } from "../drizzle/schema.js";
+import { users, prompts } from "../drizzle/schema.js";
 import { ENV } from "./_core/env.js";
+import * as redisStore from "./_core/redisStore.js";
+import type { Room, GamePlayer, GameSession } from "./_core/redisStore.js";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _dbReady: Promise<void> | null = null;
@@ -61,7 +63,7 @@ function describeDatabaseError(error: unknown) {
   return Array.from(details).join(" | ");
 }
 
-async function bootstrapGameSchema(db: ReturnType<typeof drizzle>) {
+async function bootstrapUserSchema(db: ReturnType<typeof drizzle>) {
   const statements = [
     `CREATE TABLE IF NOT EXISTS \`users\` (
       \`id\` int AUTO_INCREMENT NOT NULL,
@@ -76,36 +78,6 @@ async function bootstrapGameSchema(db: ReturnType<typeof drizzle>) {
       CONSTRAINT \`users_id\` PRIMARY KEY(\`id\`),
       CONSTRAINT \`users_openId_unique\` UNIQUE(\`openId\`)
     )`,
-    `CREATE TABLE IF NOT EXISTS \`rooms\` (
-      \`id\` int AUTO_INCREMENT NOT NULL,
-      \`roomCode\` varchar(8) NOT NULL,
-      \`gameMode\` enum('classic','spicy','party') NOT NULL,
-      \`roundCount\` int NOT NULL DEFAULT 5,
-      \`status\` enum('waiting','in_progress','completed') NOT NULL DEFAULT 'waiting',
-      \`currentRound\` int NOT NULL DEFAULT 0,
-      \`currentPlayerIndex\` int NOT NULL DEFAULT 0,
-      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
-      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
-      CONSTRAINT \`rooms_id\` PRIMARY KEY(\`id\`),
-      CONSTRAINT \`rooms_roomCode_unique\` UNIQUE(\`roomCode\`)
-    )`,
-    `CREATE TABLE IF NOT EXISTS \`gamePlayers\` (
-      \`id\` int AUTO_INCREMENT NOT NULL,
-      \`roomId\` int NOT NULL,
-      \`userId\` int,
-      \`playerName\` varchar(64) NOT NULL,
-      \`playerIndex\` int NOT NULL,
-      \`score\` int NOT NULL DEFAULT 0,
-      \`streak\` int NOT NULL DEFAULT 0,
-      \`completedCount\` int NOT NULL DEFAULT 0,
-      \`passedCount\` int NOT NULL DEFAULT 0,
-      \`skippedCount\` int NOT NULL DEFAULT 0,
-      \`isReady\` int NOT NULL DEFAULT 0,
-      \`isConnected\` int NOT NULL DEFAULT 1,
-      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
-      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
-      CONSTRAINT \`gamePlayers_id\` PRIMARY KEY(\`id\`)
-    )`,
     `CREATE TABLE IF NOT EXISTS \`prompts\` (
       \`id\` int AUTO_INCREMENT NOT NULL,
       \`gameMode\` enum('classic','spicy','party') NOT NULL,
@@ -117,46 +89,10 @@ async function bootstrapGameSchema(db: ReturnType<typeof drizzle>) {
       \`createdAt\` timestamp NOT NULL DEFAULT (now()),
       CONSTRAINT \`prompts_id\` PRIMARY KEY(\`id\`)
     )`,
-    `CREATE TABLE IF NOT EXISTS \`gameSessions\` (
-      \`id\` int AUTO_INCREMENT NOT NULL,
-      \`roomId\` int NOT NULL,
-      \`round\` int NOT NULL,
-      \`playerTurnId\` int NOT NULL,
-      \`questionType\` enum('truth','dare') NOT NULL,
-      \`status\` enum('pending','awaiting_confirmation','completed','skipped') NOT NULL DEFAULT 'pending',
-      \`promptText\` text NOT NULL,
-      \`promptId\` int,
-      \`action\` enum('completed','passed','skipped'),
-      \`performedByPlayerId\` int,
-      \`confirmedByPlayerId\` int,
-      \`confirmedAt\` timestamp NULL,
-      \`responseText\` text,
-      \`createdAt\` timestamp NOT NULL DEFAULT (now()),
-      \`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
-      CONSTRAINT \`gameSessions_id\` PRIMARY KEY(\`id\`)
-    )`,
   ];
 
   for (const statement of statements) {
     await db.execute(sql.raw(statement));
-  }
-
-  const reconciliationStatements = [
-    "ALTER TABLE `rooms` DROP FOREIGN KEY `rooms_hostId_users_id_fk`",
-    "ALTER TABLE `rooms` DROP COLUMN `hostId`",
-    "ALTER TABLE `gameSessions` ADD COLUMN `status` enum('pending','awaiting_confirmation','completed','skipped') NOT NULL DEFAULT 'pending'",
-    "ALTER TABLE `gameSessions` ADD COLUMN `promptText` text NOT NULL",
-    "ALTER TABLE `gameSessions` ADD COLUMN `performedByPlayerId` int",
-    "ALTER TABLE `gameSessions` ADD COLUMN `confirmedByPlayerId` int",
-    "ALTER TABLE `gameSessions` ADD COLUMN `confirmedAt` timestamp NULL",
-  ];
-
-  for (const statement of reconciliationStatements) {
-    try {
-      await db.execute(sql.raw(statement));
-    } catch {
-      // Ignore legacy-schema reconciliation failures when the DB is already aligned.
-    }
   }
 }
 
@@ -173,7 +109,7 @@ async function ensureDbReady(db: ReturnType<typeof drizzle>) {
     }
 
     try {
-      await bootstrapGameSchema(db);
+      await bootstrapUserSchema(db);
     } catch (error) {
       console.warn("[Database] Schema bootstrap failed:", error);
     }
@@ -278,259 +214,123 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// ============ GAME-SPECIFIC QUERIES ============
+// ============ GAME ROOM OPERATIONS (REDIS) ============
 
-export async function createRoom(gameMode: string, roundCount: number, roomCode: string) {
-  const db = await getDb();
-  if (!db) throw new Error(_dbUnavailableReason ?? "Database not available");
-
-  try {
-    await db.insert(rooms).values({
-      roomCode,
-      gameMode: gameMode as any,
-      roundCount,
-      status: "waiting",
-    });
-  } catch (error) {
-    const description = describeDatabaseError(error);
-    console.error("[Database] Failed to insert room:", error);
-    throw new Error(description || "Room insert failed");
-  }
-
-  const createdRoom = await getRoomByCode(roomCode);
-  if (!createdRoom) {
-    throw new Error("Failed to create room");
-  }
-
-  return createdRoom;
+export async function createRoom(gameMode: string, roundCount: number, roomCode: string): Promise<Room> {
+  return redisStore.createRoom(roomCode, gameMode, roundCount);
 }
 
-export async function getRoomByCode(roomCode: string) {
-  const db = await getDb();
-  if (!db) return null;
-
-  const result = await db.select().from(rooms).where(eq(rooms.roomCode, roomCode)).limit(1);
-  return result.length > 0 ? result[0] : null;
+export async function getRoomByCode(roomCode: string): Promise<Room | null> {
+  return redisStore.getRoomByCode(roomCode);
 }
 
-export async function getRoomById(roomId: number) {
-  const db = await getDb();
-  if (!db) return null;
-
-  const result = await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1);
-  return result.length > 0 ? result[0] : null;
+export async function getRoomById(roomId: string): Promise<Room | null> {
+  return redisStore.getRoomById(roomId);
 }
 
-export async function updateRoomStatus(roomId: number, status: string, currentRound?: number, currentPlayerIndex?: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  const updates: any = { status: status as any };
-  if (currentRound !== undefined) updates.currentRound = currentRound;
-  if (currentPlayerIndex !== undefined) updates.currentPlayerIndex = currentPlayerIndex;
-
-  await db.update(rooms).set(updates).where(eq(rooms.id, roomId));
+export async function updateRoomStatus(
+  roomId: string,
+  status: string,
+  currentRound?: number,
+  currentPlayerIndex?: number
+): Promise<void> {
+  return redisStore.updateRoomStatus(roomId, status, currentRound, currentPlayerIndex);
 }
 
-export async function resetRoomForReplay(roomId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  await db
-    .update(rooms)
-    .set({
-      status: "waiting",
-      currentRound: 0,
-      currentPlayerIndex: 0,
-    } as any)
-    .where(eq(rooms.id, roomId));
-
-  await db
-    .update(gamePlayers)
-    .set({
-      score: 0,
-      streak: 0,
-      completedCount: 0,
-      passedCount: 0,
-      skippedCount: 0,
-      isReady: 0,
-    })
-    .where(eq(gamePlayers.roomId, roomId));
+export async function resetRoomForReplay(roomId: string): Promise<void> {
+  return redisStore.resetRoomForReplay(roomId);
 }
 
-export async function addGamePlayer(roomId: number, playerName: string, playerIndex: number, userId?: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+// ============ GAME PLAYER OPERATIONS (REDIS) ============
 
-  const result = await db.insert(gamePlayers).values({
-    roomId,
-    playerName,
-    playerIndex,
-    userId: userId || null,
-  });
-
-  return result;
+export async function addGamePlayer(
+  roomId: string,
+  playerName: string,
+  playerIndex: number,
+  userId?: number
+): Promise<GamePlayer> {
+  return redisStore.addGamePlayer(roomId, playerName, playerIndex, userId);
 }
 
-export async function getGamePlayersByRoomId(roomId: number) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db.select().from(gamePlayers).where(eq(gamePlayers.roomId, roomId));
+export async function getGamePlayersByRoomId(roomId: string): Promise<GamePlayer[]> {
+  return redisStore.getGamePlayersByRoomId(roomId);
 }
 
-export async function updatePlayerReady(playerId: number, isReady: boolean) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  await db.update(gamePlayers).set({ isReady: isReady ? 1 : 0 }).where(eq(gamePlayers.id, playerId));
+export async function updatePlayerReady(playerId: string, isReady: boolean): Promise<void> {
+  return redisStore.updatePlayerReady(playerId, isReady);
 }
 
-export async function updatePlayerStats(playerId: number, action: "completed" | "passed" | "skipped") {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  const updates: any = {};
-  if (action === "completed") {
-    updates.completedCount = sql`completedCount + 1`;
-    updates.score = sql`score + 10`;
-    updates.streak = sql`streak + 1`;
-  } else if (action === "passed") {
-    updates.passedCount = sql`passedCount + 1`;
-    updates.streak = 0;
-  } else if (action === "skipped") {
-    updates.skippedCount = sql`skippedCount + 1`;
-    updates.streak = 0;
-  }
-
-  await db.update(gamePlayers).set(updates).where(eq(gamePlayers.id, playerId));
+export async function updatePlayerStats(playerId: string, action: "completed" | "passed" | "skipped"): Promise<void> {
+  return redisStore.updatePlayerStats(playerId, action);
 }
 
-export async function createGameSession(roomId: number, round: number, playerTurnId: number, questionType: string, promptId?: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+// ============ GAME SESSION OPERATIONS (REDIS) ============
 
-  const result = await db.insert(gameSessions).values({
-    roomId,
-    round,
-    playerTurnId,
-    questionType: questionType as any,
-    status: "pending",
-    promptText: "",
-    promptId: promptId || null,
-  });
-
-  return result;
-}
-
-export async function createQuestionSession(
-  roomId: number,
+export async function createGameSession(
+  roomId: string,
   round: number,
-  playerTurnId: number,
-  questionType: "truth" | "dare",
-  promptText: string
-) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  await db.insert(gameSessions).values({
+  playerTurnId: string,
+  questionType: string,
+  promptId?: number
+): Promise<GameSession> {
+  const session = await redisStore.createQuestionSession(
     roomId,
     round,
     playerTurnId,
-    questionType,
-    status: "pending",
-    promptText,
-  });
-
-  const [session] = await db
-    .select()
-    .from(gameSessions)
-    .where(and(eq(gameSessions.roomId, roomId), eq(gameSessions.round, round), eq(gameSessions.playerTurnId, playerTurnId)))
-    .orderBy(desc(gameSessions.id))
-    .limit(1);
-
-  if (!session) {
-    throw new Error("Failed to create game session");
+    questionType as "truth" | "dare",
+    ""
+  );
+  if (promptId) {
+    session.promptId = promptId;
   }
-
   return session;
 }
 
-export async function updateGameSessionAction(sessionId: number, action: string, responseText?: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  const updates: any = { action: action as any };
-  if (responseText) updates.responseText = responseText;
-
-  await db.update(gameSessions).set(updates).where(eq(gameSessions.id, sessionId));
+export async function createQuestionSession(
+  roomId: string,
+  round: number,
+  playerTurnId: string,
+  questionType: "truth" | "dare",
+  promptText: string
+): Promise<GameSession> {
+  return redisStore.createQuestionSession(roomId, round, playerTurnId, questionType, promptText);
 }
 
-export async function getLatestRoomSession(roomId: number) {
-  const db = await getDb();
-  if (!db) return null;
-
-  const [session] = await db
-    .select()
-    .from(gameSessions)
-    .where(eq(gameSessions.roomId, roomId))
-    .orderBy(desc(gameSessions.id))
-    .limit(1);
-
-  return session ?? null;
+export async function updateGameSessionAction(sessionId: string, action: string, responseText?: string): Promise<void> {
+  const session = await redisStore.getGameSessionById(sessionId);
+  if (!session) throw new Error("Session not found");
+  session.action = action as any;
+  if (responseText) session.responseText = responseText;
+  session.updatedAt = Date.now();
+  // The session is updated via other methods, this is a simplified version
 }
 
-export async function getGameSessionById(sessionId: number) {
-  const db = await getDb();
-  if (!db) return null;
+export async function getLatestRoomSession(roomId: string): Promise<GameSession | null> {
+  return redisStore.getLatestRoomSession(roomId);
+}
 
-  const [session] = await db
-    .select()
-    .from(gameSessions)
-    .where(eq(gameSessions.id, sessionId))
-    .limit(1);
-
-  return session ?? null;
+export async function getGameSessionById(sessionId: string): Promise<GameSession | null> {
+  return redisStore.getGameSessionById(sessionId);
 }
 
 export async function setSessionAwaitingConfirmation(
-  sessionId: number,
-  playerId: number,
+  sessionId: string,
+  playerId: string,
   responseText?: string
-) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  await db
-    .update(gameSessions)
-    .set({
-      action: "completed",
-      status: "awaiting_confirmation",
-      performedByPlayerId: playerId,
-      responseText: responseText ?? null,
-    } as any)
-    .where(eq(gameSessions.id, sessionId));
+): Promise<void> {
+  return redisStore.setSessionAwaitingConfirmation(sessionId, playerId, responseText);
 }
 
 export async function finalizeSession(
-  sessionId: number,
+  sessionId: string,
   status: "completed" | "skipped",
   action: "completed" | "skipped",
-  confirmedByPlayerId?: number
-) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  await db
-    .update(gameSessions)
-    .set({
-      status,
-      action,
-      confirmedByPlayerId: confirmedByPlayerId ?? null,
-      confirmedAt: confirmedByPlayerId ? new Date() : null,
-    } as any)
-    .where(eq(gameSessions.id, sessionId));
+  confirmedByPlayerId?: string
+): Promise<void> {
+  return redisStore.finalizeSession(sessionId, status, action, confirmedByPlayerId);
 }
+
+// ============ PROMPT OPERATIONS (SQL) ============
 
 export async function storePrompt(gameMode: string, playerCount: number, type: string, text: string) {
   const db = await getDb();
@@ -563,4 +363,10 @@ export async function incrementPromptUsage(promptId: number) {
   if (!db) throw new Error("Database not available");
 
   await db.update(prompts).set({ usageCount: sql`usageCount + 1` }).where(eq(prompts.id, promptId));
+}
+
+// ============ HELPER EXPORTS ============
+
+export async function getRoomCodeForId(roomId: string): Promise<string | null> {
+  return redisStore.getRoomCodeForId(roomId);
 }

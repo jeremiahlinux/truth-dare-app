@@ -9,6 +9,7 @@ import {
   setSessionAwaitingConfirmation,
   updatePlayerStats,
   updateRoomStatus,
+  getRoomCodeForId,
 } from "../db.js";
 import { generateTruthAndDare } from "./promptGenerator.js";
 
@@ -16,7 +17,8 @@ type GameMode = "classic" | "spicy" | "party";
 type SessionStatus = "pending" | "awaiting_confirmation" | "completed" | "skipped";
 
 interface GameState {
-  roomId: number;
+  roomId: string;
+  roomCode: string;
   status: "waiting" | "in_progress" | "completed";
   currentRound: number;
   totalRounds: number;
@@ -24,18 +26,18 @@ interface GameState {
   gameMode: GameMode;
   players: any[];
   currentQuestion: null | {
-    sessionId: number;
+    sessionId: string;
     type: "truth" | "dare";
     text: string;
     status: SessionStatus;
-    turnPlayerId: number;
-    performedByPlayerId: number | null;
-    confirmedByPlayerId: number | null;
+    turnPlayerId: string;
+    performedByPlayerId: string | null;
+    confirmedByPlayerId: string | null;
   };
 }
 
 interface PlayerAction {
-  playerId: number;
+  playerId: string;
   action: "completed" | "skipped";
   responseText?: string;
 }
@@ -51,12 +53,12 @@ function mapPlayers(players: any[]) {
       completed: p.completedCount,
       passed: p.passedCount,
       skipped: p.skippedCount,
-      isReady: p.isReady === 1,
-      isConnected: p.isConnected === 1,
+      isReady: p.isReady,
+      isConnected: p.isConnected,
     }));
 }
 
-async function buildGameState(roomId: number): Promise<GameState | undefined> {
+async function buildGameState(roomId: string): Promise<GameState | undefined> {
   const room = await getRoomById(roomId);
   if (!room) return undefined;
 
@@ -79,6 +81,7 @@ async function buildGameState(roomId: number): Promise<GameState | undefined> {
 
   return {
     roomId,
+    roomCode: room.roomCode,
     status: room.status as GameState["status"],
     currentRound: room.currentRound,
     totalRounds: room.roundCount,
@@ -89,7 +92,7 @@ async function buildGameState(roomId: number): Promise<GameState | undefined> {
   };
 }
 
-export async function initializeGame(roomId: number): Promise<GameState> {
+export async function initializeGame(roomId: string): Promise<GameState> {
   const room = await getRoomById(roomId);
   if (!room) throw new Error("Room not found");
 
@@ -99,11 +102,11 @@ export async function initializeGame(roomId: number): Promise<GameState> {
   return gameState;
 }
 
-export async function getGameState(roomId: number): Promise<GameState | undefined> {
+export async function getGameState(roomId: string): Promise<GameState | undefined> {
   return buildGameState(roomId);
 }
 
-async function advanceTurn(roomId: number): Promise<void> {
+async function advanceTurn(roomId: string): Promise<void> {
   const room = await getRoomById(roomId);
   if (!room) throw new Error("Room not found");
 
@@ -125,9 +128,9 @@ async function advanceTurn(roomId: number): Promise<void> {
 }
 
 export async function generateNextQuestion(
-  roomId: number,
+  roomId: string,
   preferredType?: "truth" | "dare"
-): Promise<{ sessionId: number; type: "truth" | "dare"; text: string } | null> {
+): Promise<{ sessionId: string; type: "truth" | "dare"; text: string } | null> {
   const gameState = await getGameState(roomId);
   if (!gameState || gameState.status !== "in_progress") {
     throw new Error("Game not initialized");
@@ -158,7 +161,7 @@ export async function generateNextQuestion(
   return { sessionId: session.id, type, text };
 }
 
-export async function handlePlayerAction(roomId: number, action: PlayerAction): Promise<void> {
+export async function handlePlayerAction(roomId: string, action: PlayerAction): Promise<void> {
   const gameState = await getGameState(roomId);
   if (!gameState || gameState.status !== "in_progress") throw new Error("Game not initialized");
 
@@ -189,9 +192,9 @@ export async function handlePlayerAction(roomId: number, action: PlayerAction): 
 }
 
 export async function confirmPlayerAction(
-  roomId: number,
-  sessionId: number,
-  confirmerPlayerId: number,
+  roomId: string,
+  sessionId: string,
+  confirmerPlayerId: string,
   approved: boolean
 ) {
   const gameState = await getGameState(roomId);
@@ -227,13 +230,13 @@ export async function confirmPlayerAction(
   return getGameState(roomId);
 }
 
-export async function getCurrentPlayer(roomId: number) {
+export async function getCurrentPlayer(roomId: string) {
   const gameState = await getGameState(roomId);
   if (!gameState) return null;
   return gameState.players[gameState.currentPlayerIndex];
 }
 
-export async function getGameResults(roomId: number) {
+export async function getGameResults(roomId: string) {
   const gameState = await getGameState(roomId);
   if (!gameState) return null;
 
@@ -255,15 +258,15 @@ export async function getGameResults(roomId: number) {
   };
 }
 
-export function cleanupGame(_roomId: number): void {
-  // DB-authoritative state; no in-memory cleanup needed.
+export function cleanupGame(_roomId: string): void {
+  // Redis-backed state; TTL handles auto cleanup.
 }
 
-export async function replayGame(roomId: number): Promise<GameState> {
+export async function replayGame(roomId: string): Promise<GameState> {
   await resetRoomForReplay(roomId);
   return initializeGame(roomId);
 }
 
-export function updatePlayerConnection(_roomId: number, _playerId: number, _isConnected: boolean): void {
-  // No-op for now. Connection state is polled from DB snapshot.
+export function updatePlayerConnection(_roomId: string, _playerId: string, _isConnected: boolean): void {
+  // No-op for now. Connection state is polled from Redis snapshot.
 }
