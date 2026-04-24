@@ -21,20 +21,14 @@ export default function RoomPage() {
   );
 
   // Fetch room data
-  const { data: room, isLoading, error } = trpc.game.joinRoom.useQuery(
+  const { data: room, isLoading, error, refetch: refetchRoom } = trpc.game.joinRoom.useQuery(
     { roomCode: roomCode?.toUpperCase() || "" },
-    { enabled: !!roomCode, refetchInterval: 2000 }
+    { enabled: !!roomCode, refetchInterval: 1000 }
   );
 
   const setReadyMutation = trpc.game.setPlayerReady.useMutation({
-    onMutate: async ({ playerId, isReady }) => {
-      // Optimistically update the UI
-      // We can't easily update trpc cache without more boilerplate here, 
-      // but we can at least show a local state if needed.
-      // For now, let's just make sure the button feels responsive.
-    },
     onSuccess: () => {
-      // Refresh the query immediately
+      refetchRoom();
       utils.game.joinRoom.invalidate({ roomCode: roomCode?.toUpperCase() || "" });
     }
   });
@@ -73,6 +67,7 @@ export default function RoomPage() {
   };
 
   const handleToggleReady = async (playerId: string) => {
+    console.log("Toggling ready for:", playerId, "current localPlayerId:", localPlayerId);
     // Only allow toggling if it's the local player
     if (playerId !== localPlayerId) {
       toast.error("You can only toggle your own ready state!");
@@ -81,13 +76,16 @@ export default function RoomPage() {
 
     const player = room.players.find((p) => p.id === playerId);
     if (player) {
+      console.log("Found player, isReady currently:", player.isReady);
       try {
         await setReadyMutation.mutateAsync({
           roomId: room.roomId,
           playerId,
           isReady: !player.isReady,
         });
+        console.log("Mutation successful");
       } catch (err) {
+        console.error("Mutation failed:", err);
         toast.error("Failed to update status");
       }
     }

@@ -234,7 +234,7 @@ export async function updatePlayerReady(roomId: string, playerId: string, isRead
   player.isReady = isReady;
   player.updatedAt = Date.now();
   
-  await redis.setex(key, ROOM_TTL, player);
+  await redis.setex(key, ROOM_TTL, JSON.stringify(player));
 }
 
 export async function updatePlayerStats(
