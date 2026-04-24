@@ -226,6 +226,7 @@ export async function getGamePlayersByRoomId(roomId: string): Promise<GamePlayer
   for (const key of keys) {
     const player = await getJson<GamePlayer>(key);
     if (player) {
+      if (player.isOccupied === undefined) player.isOccupied = player.isReady || false;
       players.push(player);
     }
   }

@@ -170,6 +170,7 @@ export default function RoomPage() {
             <h2 className="text-2xl font-bold mb-6 tracking-tight">Players ({room.players.length})</h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-10">
+              {console.log("Room Players:", room.players)}
               {room.players.map((player) => (
                 <div
                   key={player.id}
@@ -221,7 +222,7 @@ export default function RoomPage() {
                     </Button>
                   ) : (
                     <div className="text-sm text-foreground/40 italic">
-                      {player.isOccupied ? (player.isReady ? "Ready" : "Waiting...") : "Open Slot"}
+                      {(player.isOccupied || player.isReady) ? (player.isReady ? "✓ Ready" : "Waiting...") : "Open Slot"}
                     </div>
                   )}
                 </div>
