@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc.js";
-import { createRoom, getRoomByCode, getGamePlayersByRoomId, addGamePlayer, updatePlayerReady, getRoomById } from "../db.js";
+import { createRoom, getRoomByCode, getGamePlayersByRoomId, addGamePlayer, updatePlayerReady, getRoomById, claimPlayerSlot } from "../db.js";
 import { initializeGame, getGameState, generateNextQuestion, handlePlayerAction, getCurrentPlayer, getGameResults, cleanupGame, replayGame, confirmPlayerAction } from "../services/gameManager.js";
 import { nanoid } from "nanoid";
 

@@ -256,8 +256,12 @@ export async function getGamePlayersByRoomId(roomId: string): Promise<GamePlayer
   return redisStore.getGamePlayersByRoomId(roomId);
 }
 
-export async function updatePlayerReady(playerId: string, isReady: boolean): Promise<void> {
-  return redisStore.updatePlayerReady(playerId, isReady);
+export async function updatePlayerReady(roomId: string, playerId: string, isReady: boolean): Promise<void> {
+  return redisStore.updatePlayerReady(roomId, playerId, isReady);
+}
+
+export async function claimPlayerSlot(roomId: string, playerId: string): Promise<void> {
+  return redisStore.claimPlayerSlot(roomId, playerId);
 }
 
 export async function updatePlayerStats(playerId: string, action: "completed" | "passed" | "skipped"): Promise<void> {
