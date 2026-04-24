@@ -31,6 +31,13 @@ export default function Home() {
   const [gameMode, setGameMode] = useState<"classic" | "spicy" | "party">("classic");
   const [roundCount, setRoundCount] = useState(5);
 
+  const handleFillNames = () => {
+    const funNames = ["Cyber", "Neon", "Volt", "Glitch", "Pulse", "Echo", "Static", "Pixel"];
+    const shuffled = [...funNames].sort(() => 0.5 - Math.random());
+    const newNames = playerNames.map((_, i) => shuffled[i] || `Player ${i + 1}`);
+    setPlayerNames(newNames);
+  };
+
   const createRoomMutation = trpc.game.createRoom.useMutation();
   const joinRoomQuery = trpc.game.joinRoom.useQuery(
     { roomCode: roomCode.toUpperCase() },
@@ -213,7 +220,17 @@ export default function Home() {
 
             {/* Player Names */}
             <div>
-              <Label className="text-base font-bold mb-3 block">Player Names</Label>
+              <div className="flex justify-between items-center mb-3">
+                <Label className="text-base font-bold block">Player Names</Label>
+                <Button 
+                  variant="link" 
+                  size="sm" 
+                  className="text-accent h-auto p-0"
+                  onClick={handleFillNames}
+                >
+                  Give them fun names
+                </Button>
+              </div>
               <div className="space-y-3 max-h-64 overflow-y-auto">
                 {playerNames.map((name, index) => (
                   <div key={index} className="flex gap-2">

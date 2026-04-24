@@ -16,6 +16,9 @@ export default function RoomPage() {
   const { roomCode } = useParams<{ roomCode: string }>();
   const [, navigate] = useLocation();
   const [copied, setCopied] = useState(false);
+  const [localPlayerId, setLocalPlayerId] = useState<string | null>(() => 
+    localStorage.getItem(`claimed_player_${roomCode}`)
+  );
 
   // Fetch room data
   const { data: room, isLoading, error } = trpc.game.joinRoom.useQuery(
@@ -23,8 +26,20 @@ export default function RoomPage() {
     { enabled: !!roomCode, refetchInterval: 2000 }
   );
 
-  const setReadyMutation = trpc.game.setPlayerReady.useMutation();
+  const setReadyMutation = trpc.game.setPlayerReady.useMutation({
+    onMutate: async ({ playerId, isReady }) => {
+      // Optimistically update the UI
+      // We can't easily update trpc cache without more boilerplate here, 
+      // but we can at least show a local state if needed.
+      // For now, let's just make sure the button feels responsive.
+    },
+    onSuccess: () => {
+      // Refresh the query immediately
+      utils.game.joinRoom.invalidate({ roomCode: roomCode?.toUpperCase() || "" });
+    }
+  });
   const startGameMutation = trpc.game.startGame.useMutation();
+  const utils = trpc.useUtils();
 
   if (isLoading) {
     return (
@@ -58,13 +73,29 @@ export default function RoomPage() {
   };
 
   const handleToggleReady = async (playerId: string) => {
+    // Only allow toggling if it's the local player
+    if (playerId !== localPlayerId) {
+      toast.error("You can only toggle your own ready state!");
+      return;
+    }
+
     const player = room.players.find((p) => p.id === playerId);
     if (player) {
-      await setReadyMutation.mutateAsync({
-        playerId,
-        isReady: !player.isReady,
-      });
+      try {
+        await setReadyMutation.mutateAsync({
+          playerId,
+          isReady: !player.isReady,
+        });
+      } catch (err) {
+        toast.error("Failed to update status");
+      }
     }
+  };
+
+  const handleClaimPlayer = (playerId: string) => {
+    localStorage.setItem(`claimed_player_${roomCode}`, playerId);
+    setLocalPlayerId(playerId);
+    toast.success("You have claimed this player!");
   };
 
   const handleStartGame = async () => {
@@ -144,23 +175,43 @@ export default function RoomPage() {
                     className="mb-4"
                   />
 
-                  <h3 className="text-lg font-bold text-foreground mb-4">{player.name}</h3>
+                  <h3 className="text-lg font-bold text-foreground mb-4">
+                    {player.name} {player.id === localPlayerId && "(You)"}
+                  </h3>
 
-                  <Button
-                    size="sm"
-                    className={`w-full ${
-                      player.isReady
-                        ? "bg-accent/20 text-accent hover:bg-accent/30"
-                        : "bg-muted text-foreground hover:bg-muted/80"
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleReady(player.id);
-                    }}
-                    disabled={setReadyMutation.isPending}
-                  >
-                    {player.isReady ? "✓ Ready" : "Not Ready"}
-                  </Button>
+                  {player.id === localPlayerId ? (
+                    <Button
+                      size="sm"
+                      className={`w-full ${
+                        player.isReady
+                          ? "bg-accent/20 text-accent hover:bg-accent/30"
+                          : "bg-muted text-foreground hover:bg-muted/80"
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleReady(player.id);
+                      }}
+                      disabled={setReadyMutation.isPending}
+                    >
+                      {player.isReady ? "✓ Ready" : "Set Ready"}
+                    </Button>
+                  ) : !localPlayerId ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full border-accent text-accent hover:bg-accent/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClaimPlayer(player.id);
+                      }}
+                    >
+                      This is Me
+                    </Button>
+                  ) : (
+                    <div className="text-sm text-foreground/40 italic">
+                      {player.isReady ? "Ready" : "Waiting..."}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

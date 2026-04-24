@@ -245,7 +245,7 @@ export default function GamePage() {
                     <select
                       className="mb-4 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                       value={selectedConfirmerId ?? ""}
-                      onChange={(e) => setSelectedConfirmerId(Number(e.target.value))}
+                      onChange={(e) => setSelectedConfirmerId(e.target.value)}
                     >
                       {confirmerOptions.map((player) => (
                         <option key={player.id} value={player.id}>
