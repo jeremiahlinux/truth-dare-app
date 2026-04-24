@@ -90,11 +90,11 @@ export async function createRoom(roomCode: string, gameMode: string, roundCount:
   };
 
   const roomKey = `room:${roomCode}`;
-  const roomIdKey = `room-id:${roomCode}`;
+  const roomIdKey = `room-id:${roomId}`;
 
   // Store both by code and by ID for quick lookups
   await redis.setex(roomKey, ROOM_TTL, room);
-  await redis.setex(roomIdKey, ROOM_TTL, roomId);
+  await redis.setex(roomIdKey, ROOM_TTL, roomCode);
 
   return room;
 }
@@ -124,60 +124,54 @@ export async function updateRoomStatus(
   currentPlayerIndex?: number
 ): Promise<void> {
   const redis = getRedis();
-  // Get room by searching all room keys (simplified approach)
-  // In production, you'd want a better indexing strategy
-  const allKeys = await redis.keys("room:*");
-  
-  for (const key of allKeys) {
-    const roomData = await redis.get(key);
-    if (!roomData) continue;
-    const room = roomData as Room;
-    if (room.id === roomId) {
-      room.status = status;
-      if (currentRound !== undefined) room.currentRound = currentRound;
-      if (currentPlayerIndex !== undefined) room.currentPlayerIndex = currentPlayerIndex;
-      room.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, room);
-      return;
-    }
-  }
-  throw new Error(`Room ${roomId} not found`);
+  const roomCode = await redis.get(`room-id:${roomId}`);
+  if (!roomCode) throw new Error(`Room ${roomId} not found`);
+
+  const roomKey = `room:${roomCode}`;
+  const roomData = await redis.get(roomKey);
+  if (!roomData) throw new Error(`Room data for ${roomCode} not found`);
+
+  const room = roomData as Room;
+  room.status = status;
+  if (currentRound !== undefined) room.currentRound = currentRound;
+  if (currentPlayerIndex !== undefined) room.currentPlayerIndex = currentPlayerIndex;
+  room.updatedAt = Date.now();
+
+  await redis.setex(roomKey, ROOM_TTL, room);
 }
 
 export async function resetRoomForReplay(roomId: string): Promise<void> {
   const redis = getRedis();
-  const allKeys = await redis.keys("room:*");
-  
-  for (const key of allKeys) {
-    const roomData = await redis.get(key);
-    if (!roomData) continue;
-    const room = roomData as Room;
-    if (room.id === roomId) {
-      room.status = "waiting";
-      room.currentRound = 0;
-      room.currentPlayerIndex = 0;
-      room.updatedAt = Date.now();
-      await redis.setex(key, ROOM_TTL, room);
+  const roomCode = await redis.get(`room-id:${roomId}`);
+  if (!roomCode) throw new Error(`Room ${roomId} not found`);
+
+  const roomKey = `room:${roomCode}`;
+  const roomData = await redis.get(roomKey);
+  if (!roomData) throw new Error(`Room data for ${roomCode} not found`);
+
+  const room = roomData as Room;
+  room.status = "waiting";
+  room.currentRound = 0;
+  room.currentPlayerIndex = 0;
+  room.updatedAt = Date.now();
+
+  await redis.setex(roomKey, ROOM_TTL, room);
       
-      // Reset all players in this room
-      const playerKeys = await redis.keys(`players:${roomId}:*`);
-      for (const pKey of playerKeys) {
-        const playerData = await redis.get(pKey);
-        if (!playerData) continue;
-        const player = playerData as GamePlayer;
-        player.score = 0;
-        player.streak = 0;
-        player.completedCount = 0;
-        player.passedCount = 0;
-        player.skippedCount = 0;
-        player.isReady = false;
-        player.updatedAt = Date.now();
-        await redis.setex(pKey, ROOM_TTL, player);
-      }
-      return;
-    }
+  // Reset all players in this room
+  const playerKeys = await redis.keys(`players:${roomId}:*`);
+  for (const pKey of playerKeys) {
+    const playerData = await redis.get(pKey);
+    if (!playerData) continue;
+    const player = playerData as GamePlayer;
+    player.score = 0;
+    player.streak = 0;
+    player.completedCount = 0;
+    player.passedCount = 0;
+    player.skippedCount = 0;
+    player.isReady = false;
+    player.updatedAt = Date.now();
+    await redis.setex(pKey, ROOM_TTL, player);
   }
-  throw new Error(`Room ${roomId} not found`);
 }
 
 // Player operations
