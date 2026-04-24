@@ -33,6 +33,11 @@ export default function RoomPage() {
     }
   });
   const startGameMutation = trpc.game.startGame.useMutation();
+  const claimPlayerMutation = trpc.game.claimPlayer.useMutation({
+    onSuccess: () => {
+      utils.game.joinRoom.invalidate({ roomCode: roomCode?.toUpperCase() || "" });
+    }
+  });
   const utils = trpc.useUtils();
 
   if (isLoading) {
@@ -91,10 +96,18 @@ export default function RoomPage() {
     }
   };
 
-  const handleClaimPlayer = (playerId: string) => {
-    localStorage.setItem(`claimed_player_${roomCode}`, playerId);
-    setLocalPlayerId(playerId);
-    toast.success("You have claimed this player!");
+  const handleClaimPlayer = async (playerId: string) => {
+    try {
+      await claimPlayerMutation.mutateAsync({
+        roomId: room.roomId,
+        playerId,
+      });
+      localStorage.setItem(`claimed_player_${roomCode}`, playerId);
+      setLocalPlayerId(playerId);
+      toast.success("You have claimed this player!");
+    } catch (err) {
+      toast.error("Failed to claim player");
+    }
   };
 
   const handleStartGame = async () => {
@@ -194,7 +207,7 @@ export default function RoomPage() {
                     >
                       {setReadyMutation.isPending ? "Updating..." : (player.isReady ? "✓ Ready" : "Set Ready")}
                     </Button>
-                  ) : !localPlayerId ? (
+                  ) : !localPlayerId && !player.isOccupied ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -208,7 +221,7 @@ export default function RoomPage() {
                     </Button>
                   ) : (
                     <div className="text-sm text-foreground/40 italic">
-                      {player.isReady ? "Ready" : "Waiting..."}
+                      {player.isOccupied ? (player.isReady ? "Ready" : "Waiting...") : "Open Slot"}
                     </div>
                   )}
                 </div>

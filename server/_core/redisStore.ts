@@ -23,6 +23,22 @@ function getRedis(): Redis {
   return redis;
 }
 
+/**
+ * Safely get and parse JSON from Redis
+ */
+async function getJson<T>(key: string): Promise<T | null> {
+  const data = await getRedis().get(key);
+  if (!data) return null;
+  if (typeof data === "string") {
+    try {
+      return JSON.parse(data) as T;
+    } catch (e) {
+      return data as any;
+    }
+  }
+  return data as T;
+}
+
 // Type definitions
 export interface Room {
   id: string; // UUID instead of auto-increment
@@ -49,6 +65,7 @@ export interface GamePlayer {
   skippedCount: number;
   isReady: boolean;
   isConnected: boolean;
+  isOccupied: boolean; // Track if a real person has claimed this slot
   createdAt: number;
   updatedAt: number;
 }
@@ -100,10 +117,7 @@ export async function createRoom(roomCode: string, gameMode: string, roundCount:
 }
 
 export async function getRoomByCode(roomCode: string): Promise<Room | null> {
-  const redis = getRedis();
-  const data = await redis.get(`room:${roomCode}`);
-  if (!data) return null;
-  return data as Room;
+  return getJson<Room>(`room:${roomCode}`);
 }
 
 export async function getRoomById(roomId: string): Promise<Room | null> {
@@ -128,10 +142,8 @@ export async function updateRoomStatus(
   if (!roomCode) throw new Error(`Room ${roomId} not found`);
 
   const roomKey = `room:${roomCode}`;
-  const roomData = await redis.get(roomKey);
-  if (!roomData) throw new Error(`Room data for ${roomCode} not found`);
-
-  const room = roomData as Room;
+  const room = await getJson<Room>(roomKey);
+  if (!room) throw new Error(`Room data for ${roomCode} not found`);
   room.status = status;
   if (currentRound !== undefined) room.currentRound = currentRound;
   if (currentPlayerIndex !== undefined) room.currentPlayerIndex = currentPlayerIndex;
@@ -146,10 +158,8 @@ export async function resetRoomForReplay(roomId: string): Promise<void> {
   if (!roomCode) throw new Error(`Room ${roomId} not found`);
 
   const roomKey = `room:${roomCode}`;
-  const roomData = await redis.get(roomKey);
-  if (!roomData) throw new Error(`Room data for ${roomCode} not found`);
-
-  const room = roomData as Room;
+  const room = await getJson<Room>(roomKey);
+  if (!room) throw new Error(`Room data for ${roomCode} not found`);
   room.status = "waiting";
   room.currentRound = 0;
   room.currentPlayerIndex = 0;
@@ -160,9 +170,8 @@ export async function resetRoomForReplay(roomId: string): Promise<void> {
   // Reset all players in this room
   const playerKeys = await redis.keys(`players:${roomId}:*`);
   for (const pKey of playerKeys) {
-    const playerData = await redis.get(pKey);
-    if (!playerData) continue;
-    const player = playerData as GamePlayer;
+    const player = await getJson<GamePlayer>(pKey);
+    if (!player) continue;
     player.score = 0;
     player.streak = 0;
     player.completedCount = 0;
@@ -198,6 +207,7 @@ export async function addGamePlayer(
     skippedCount: 0,
     isReady: false,
     isConnected: true,
+    isOccupied: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -214,9 +224,9 @@ export async function getGamePlayersByRoomId(roomId: string): Promise<GamePlayer
   const players: GamePlayer[] = [];
 
   for (const key of keys) {
-    const data = await redis.get(key);
-    if (data) {
-      players.push(data as GamePlayer);
+    const player = await getJson<GamePlayer>(key);
+    if (player) {
+      players.push(player);
     }
   }
 
@@ -227,14 +237,26 @@ export async function updatePlayerReady(roomId: string, playerId: string, isRead
   const redis = getRedis();
   const key = `players:${roomId}:${playerId}`;
   
-  const data = await redis.get(key);
-  if (!data) throw new Error(`Player ${playerId} not found in room ${roomId}`);
+  const player = await getJson<GamePlayer>(key);
+  if (!player) throw new Error(`Player ${playerId} not found in room ${roomId}`);
   
-  const player = data as GamePlayer;
   player.isReady = isReady;
   player.updatedAt = Date.now();
   
-  await redis.setex(key, ROOM_TTL, JSON.stringify(player));
+  await redis.setex(key, ROOM_TTL, player);
+}
+
+export async function claimPlayerSlot(roomId: string, playerId: string): Promise<void> {
+  const redis = getRedis();
+  const key = `players:${roomId}:${playerId}`;
+  
+  const player = await getJson<GamePlayer>(key);
+  if (!player) throw new Error(`Player ${playerId} not found in room ${roomId}`);
+  
+  player.isOccupied = true;
+  player.updatedAt = Date.now();
+  
+  await redis.setex(key, ROOM_TTL, player);
 }
 
 export async function updatePlayerStats(
@@ -245,9 +267,8 @@ export async function updatePlayerStats(
   const allKeys = await redis.keys("players:*:*");
 
   for (const key of allKeys) {
-    const data = await redis.get(key);
-    if (!data) continue;
-    const player = data as GamePlayer;
+    const player = await getJson<GamePlayer>(key);
+    if (!player) continue;
     if (player.id === playerId) {
       if (action === "completed") {
         player.completedCount += 1;

@@ -161,6 +161,19 @@ export const gameRouter = router({
     }),
 
   /**
+   * Claim a player slot
+   */
+  claimPlayer: publicProcedure
+    .input(z.object({ 
+      roomId: z.string().uuid(),
+      playerId: z.string().uuid() 
+    }))
+    .mutation(async ({ input }) => {
+      await claimPlayerSlot(input.roomId, input.playerId);
+      return { success: true };
+    }),
+
+  /**
    * Start the game
    */
   startGame: publicProcedure
