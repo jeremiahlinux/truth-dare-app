@@ -93,8 +93,8 @@ async function buildGameState(roomId: string): Promise<GameState | undefined> {
 }
 
 export async function initializeGame(roomId: string): Promise<GameState> {
-  const room = await getRoomById(roomId);
-  if (!room) throw new Error("Room not found");
+  const players = await getGamePlayersByRoomId(roomId);
+  if (players.length < 2) throw new Error("At least 2 players are required to start the game");
 
   await updateRoomStatus(roomId, "in_progress", 1, 0);
   const gameState = await buildGameState(roomId);

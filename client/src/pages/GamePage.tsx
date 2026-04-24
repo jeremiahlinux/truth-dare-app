@@ -12,6 +12,11 @@ export default function GamePage() {
   const [, navigate] = useLocation();
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [selectedConfirmerId, setSelectedConfirmerId] = useState<string | null>(null);
+  const [localPlayerId] = useState<string | null>(() => 
+    localStorage.getItem(`claimed_player_${gameState?.roomCode}`) || 
+    // Fallback to searching by name if code is not available yet (rare)
+    null
+  );
 
   // Fetch game state
   const { data: gameState, refetch: refetchGameState } = trpc.game.getGameState.useQuery(
@@ -40,12 +45,23 @@ export default function GamePage() {
     };
   }, []);
 
+  // Initialize localPlayerId from roomCode once gameState is available
+  const [actualLocalPlayerId, setActualLocalPlayerId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (gameState?.roomCode) {
+      const id = localStorage.getItem(`claimed_player_${gameState.roomCode}`);
+      setActualLocalPlayerId(id);
+    }
+  }, [gameState?.roomCode]);
+
   useEffect(() => {
     if (gameState?.currentQuestion?.status === "awaiting_confirmation") {
       const options = gameState.players.filter(
         (p) => p.id !== gameState.currentQuestion?.turnPlayerId
       );
       if (!selectedConfirmerId && options.length > 0) {
+        // Auto-select the first bystander as confirmer
         setSelectedConfirmerId(options[0].id);
       }
     }
@@ -115,12 +131,14 @@ export default function GamePage() {
 
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   const currentQuestion = gameState.currentQuestion;
+  const isMyTurn = actualLocalPlayerId === currentPlayer?.id;
   const isWaitingConfirmation = currentQuestion?.status === "awaiting_confirmation";
   const canStartChoice =
     !currentQuestion || ["completed", "skipped"].includes(currentQuestion.status);
   const confirmerOptions = gameState.players.filter(
     (p) => p.id !== currentPlayer?.id
   );
+  const isIConfirmer = actualLocalPlayerId !== currentPlayer?.id && actualLocalPlayerId !== null;
 
   if (gameState.status === "completed") {
     return (
@@ -175,29 +193,40 @@ export default function GamePage() {
         <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 md:grid-cols-[1fr_320px] md:px-8">
           <section className="rounded-2xl border border-border/70 bg-card/60 p-6 backdrop-blur-sm">
             {canStartChoice && (
-              <div className="text-center">
-                <h3 className="mb-2 text-3xl font-extrabold tracking-tight">Pick Truth or Dare</h3>
-                <p className="mb-8 text-foreground/70">No spinner, no waiting. Keep the energy high.</p>
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <button
-                    onClick={() => fetchQuestion("truth")}
-                    className="group rounded-xl border border-accent/60 bg-accent/10 p-8 text-left transition hover:scale-[1.01] hover:bg-accent/20"
-                    disabled={getNextQuestionMutation.isPending}
-                >
-                    <div className="mb-4 text-5xl">🎭</div>
-                    <h4 className="mb-2 text-2xl font-black tracking-tight text-accent">Truth</h4>
-                    <p className="text-sm text-foreground/70">Answer honestly and let the group decide.</p>
-                </button>
-                <button
-                    onClick={() => fetchQuestion("dare")}
-                    className="group rounded-xl border border-secondary/60 bg-secondary/10 p-8 text-left transition hover:scale-[1.01] hover:bg-secondary/20"
-                    disabled={getNextQuestionMutation.isPending}
-                >
-                    <div className="mb-4 text-5xl">⚡</div>
-                    <h4 className="mb-2 text-2xl font-black tracking-tight text-secondary">Dare</h4>
-                    <p className="text-sm text-foreground/70">Do the challenge, then ask another player to verify.</p>
-                </button>
-                </div>
+              <div className="text-center py-10">
+                {isMyTurn ? (
+                  <>
+                    <h3 className="mb-2 text-3xl font-extrabold tracking-tight">Your Turn! Pick One</h3>
+                    <p className="mb-8 text-foreground/70">Challenge yourself or reveal a secret.</p>
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                      <button
+                        onClick={() => fetchQuestion("truth")}
+                        className="group rounded-xl border border-accent/60 bg-accent/10 p-8 text-left transition hover:scale-[1.01] hover:bg-accent/20"
+                        disabled={getNextQuestionMutation.isPending}
+                      >
+                        <div className="mb-4 text-5xl">🎭</div>
+                        <h4 className="mb-2 text-2xl font-black tracking-tight text-accent">Truth</h4>
+                        <p className="text-sm text-foreground/70">Answer honestly and let the group decide.</p>
+                      </button>
+                      <button
+                        onClick={() => fetchQuestion("dare")}
+                        className="group rounded-xl border border-secondary/60 bg-secondary/10 p-8 text-left transition hover:scale-[1.01] hover:bg-secondary/20"
+                        disabled={getNextQuestionMutation.isPending}
+                      >
+                        <div className="mb-4 text-5xl">⚡</div>
+                        <h4 className="mb-2 text-2xl font-black tracking-tight text-secondary">Dare</h4>
+                        <p className="text-sm text-foreground/70">Do the challenge, then ask another player to verify.</p>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="animate-pulse">
+                    <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground/40">
+                      Waiting for {currentPlayer.name}...
+                    </h3>
+                    <p className="text-foreground/60 italic">They are choosing between Truth or Dare</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -212,66 +241,78 @@ export default function GamePage() {
 
                 {currentQuestion.status === "pending" && (
                   <div className="flex flex-wrap items-center justify-center gap-3">
-                    <Button
-                      size="lg"
-                      className="bg-accent px-8 text-background hover:bg-accent/90"
-                      onClick={() => handleAction("completed")}
-                      disabled={submitActionMutation.isPending}
-                    >
-                      <CheckCircle2 className="mr-2 h-5 w-5" />
-                      Mark Done
-                    </Button>
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="border-secondary/60 text-secondary hover:bg-secondary/10"
-                      onClick={() => handleAction("skipped")}
-                      disabled={submitActionMutation.isPending}
-                    >
-                      <SkipForward className="mr-2 h-5 w-5" />
-                      Skip Turn
-                    </Button>
+                    {isMyTurn ? (
+                      <>
+                        <Button
+                          size="lg"
+                          className="bg-accent px-8 text-background hover:bg-accent/90"
+                          onClick={() => handleAction("completed")}
+                          disabled={submitActionMutation.isPending}
+                        >
+                          <CheckCircle2 className="mr-2 h-5 w-5" />
+                          Mark Done
+                        </Button>
+                        <Button
+                          size="lg"
+                          variant="outline"
+                          className="border-secondary/60 text-secondary hover:bg-secondary/10"
+                          onClick={() => handleAction("skipped")}
+                          disabled={submitActionMutation.isPending}
+                        >
+                          <SkipForward className="mr-2 h-5 w-5" />
+                          Skip Turn
+                        </Button>
+                      </>
+                    ) : (
+                      <p className="text-accent font-bold animate-pulse">
+                        Watching {currentPlayer.name} perform...
+                      </p>
+                    )}
                   </div>
                 )}
 
                 {isWaitingConfirmation && (
-                  <div className="rounded-xl border border-border bg-card/40 p-4 text-left">
-                    <p className="mb-3 text-sm font-semibold text-foreground/70">
-                      Another player must confirm this turn before scoring.
-                    </p>
-                    <label className="mb-2 block text-xs uppercase tracking-widest text-foreground/60">
-                      Confirming Player
-                    </label>
-                    <select
-                      className="mb-4 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                      value={selectedConfirmerId ?? ""}
-                      onChange={(e) => setSelectedConfirmerId(e.target.value)}
-                    >
-                      {confirmerOptions.map((player) => (
-                        <option key={player.id} value={player.id}>
-                          {player.name}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex flex-wrap gap-3">
-                      <Button
-                        className="bg-accent text-background hover:bg-accent/90"
-                        onClick={() => handleConfirmation(true)}
-                        disabled={confirmActionMutation.isPending || !selectedConfirmerId}
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Confirm Completed
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="border-destructive/50 text-destructive hover:bg-destructive/10"
-                        onClick={() => handleConfirmation(false)}
-                        disabled={confirmActionMutation.isPending || !selectedConfirmerId}
-                      >
-                        <XCircle className="mr-2 h-4 w-4" />
-                        Reject / Skip
-                      </Button>
-                    </div>
+                  <div className="rounded-xl border border-accent bg-accent/5 p-6 text-left animate-in fade-in zoom-in duration-300">
+                    {isIConfirmer ? (
+                      <>
+                        <p className="mb-4 text-lg font-bold text-accent">
+                          Did {currentPlayer.name} actually do it?
+                        </p>
+                        <p className="mb-4 text-sm text-foreground/70">
+                          As a bystander, you must verify if they completed the {currentQuestion.type}.
+                        </p>
+                        <div className="flex flex-wrap gap-3">
+                          <Button
+                            size="lg"
+                            className="bg-accent text-background hover:bg-accent/90"
+                            onClick={() => handleConfirmation(true)}
+                            disabled={confirmActionMutation.isPending}
+                          >
+                            <CheckCircle2 className="mr-2 h-5 w-5" />
+                            Yes, they did it!
+                          </Button>
+                          <Button
+                            size="lg"
+                            variant="outline"
+                            className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleConfirmation(false)}
+                            disabled={confirmActionMutation.isPending}
+                          >
+                            <XCircle className="mr-2 h-5 w-5" />
+                            No / They failed
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center py-4">
+                        <p className="text-xl font-bold text-accent animate-pulse mb-2">
+                          Awaiting Verification...
+                        </p>
+                        <p className="text-foreground/60 text-sm">
+                          Wait for another player to confirm your turn.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

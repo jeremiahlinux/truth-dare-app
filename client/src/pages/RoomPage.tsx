@@ -235,7 +235,7 @@ export default function RoomPage() {
                 size="lg"
                 className="bg-accent hover:bg-accent/90 text-background font-bold px-8 py-6 neon-glow-primary disabled:opacity-50"
                 onClick={handleStartGame}
-                disabled={!allPlayersReady || startGameMutation.isPending}
+                disabled={!allPlayersReady || room.players.length < 2 || startGameMutation.isPending}
               >
                 <Play className="mr-2 w-6 h-6" />
                 {startGameMutation.isPending ? "Starting..." : "Start Game"}
@@ -250,9 +250,15 @@ export default function RoomPage() {
               </Button>
             </div>
 
-            {!allPlayersReady && (
+            {!allPlayersReady && room.players.length >= 2 && (
               <p className="text-center text-foreground/60 mt-6">
                 Waiting for all players to be ready...
+              </p>
+            )}
+
+            {room.players.length < 2 && (
+              <p className="text-center text-accent font-bold mt-6 animate-pulse">
+                Add at least one more player to start!
               </p>
             )}
           </div>
