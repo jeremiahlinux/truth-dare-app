@@ -12,12 +12,6 @@ export default function GamePage() {
   const [, navigate] = useLocation();
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [selectedConfirmerId, setSelectedConfirmerId] = useState<string | null>(null);
-  const [localPlayerId] = useState<string | null>(() => 
-    localStorage.getItem(`claimed_player_${gameState?.roomCode}`) || 
-    // Fallback to searching by name if code is not available yet (rare)
-    null
-  );
-
   // Fetch game state
   const { data: gameState, refetch: refetchGameState } = trpc.game.getGameState.useQuery(
     { roomId: roomId || "" },
